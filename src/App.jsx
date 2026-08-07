@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useAuth } from "./lib/auth.jsx";
 import { AuthScreen } from "./components/AuthScreen.jsx";
+import { LandingPage } from "./components/LandingPage.jsx";
 import { Chip, Card, Label, Btn, TextInput, Spinner, ScoreRing, Waveform, RatingBar, EmptyState, Icon } from "./components/ui.jsx";
 import * as sessionsApi from "./lib/sessionsApi.js";
 import * as orgApi from "./lib/orgApi.js";
@@ -2929,6 +2930,10 @@ const PAGE_META = {
 
 export default function App() {
   const { user, loading: authLoading, signOut } = useAuth();
+  // No client router in this app — /landing is always the public marketing page (rendered
+  // before we even wait on auth to resolve), and / falls back to it for logged-out visitors.
+  // Everything else (notably /app) goes through the normal sign-in → app flow below.
+  const path = window.location.pathname;
   const [apiKey, setApiKey] = useState(() => {
     const env = import.meta.env?.VITE_ANTHROPIC_API_KEY;
     if (env && env !== "sk-ant-your-key-goes-here") return env;
@@ -3024,6 +3029,13 @@ export default function App() {
     }
   };
 
+  if (path === "/landing") return (
+    <>
+      <style>{css}</style>
+      <LandingPage isLoggedIn={!!user} />
+    </>
+  );
+
   if (authLoading) return (
     <>
       <style>{css}</style>
@@ -3033,12 +3045,20 @@ export default function App() {
     </>
   );
 
-  if (!user) return (
-    <>
-      <style>{css}</style>
-      <AuthScreen />
-    </>
-  );
+  if (!user) {
+    if (path === "/" || path === "") return (
+      <>
+        <style>{css}</style>
+        <LandingPage isLoggedIn={false} />
+      </>
+    );
+    return (
+      <>
+        <style>{css}</style>
+        <AuthScreen />
+      </>
+    );
+  }
 
   if (!apiKey) return (
     <>

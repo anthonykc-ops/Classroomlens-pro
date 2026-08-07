@@ -157,14 +157,17 @@ export function AuthScreen() {
 
       <div className="cl-auth-form-col">
         <div style={{ maxWidth: 400, width: "100%" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 28 }}>
-            <div style={{ width: 36, height: 36, background: "linear-gradient(135deg,#4f46e5,#4338ca)", borderRadius: 9, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, boxShadow: "var(--shadow-md)" }}>
-              <Icon name="lens" size={18} />
-            </div>
-            <div>
-              <div style={{ fontWeight: 800, fontSize: 15, color: "var(--text)", letterSpacing: "-0.01em" }}>ClassroomLens <span style={{ color: "var(--accent)" }}>Pro</span></div>
-              <div style={{ fontSize: 10, color: "var(--text-5)", letterSpacing: "0.08em" }}>OBSERVATION PLATFORM</div>
-            </div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 28 }}>
+            <a href="/landing" style={{ display: "flex", alignItems: "center", gap: 10, textDecoration: "none" }}>
+              <div style={{ width: 36, height: 36, background: "linear-gradient(135deg,#4f46e5,#4338ca)", borderRadius: 9, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, boxShadow: "var(--shadow-md)" }}>
+                <Icon name="lens" size={18} />
+              </div>
+              <div>
+                <div style={{ fontWeight: 800, fontSize: 15, color: "var(--text)", letterSpacing: "-0.01em" }}>ClassroomLens <span style={{ color: "var(--accent)" }}>Pro</span></div>
+                <div style={{ fontSize: 10, color: "var(--text-5)", letterSpacing: "0.08em" }}>OBSERVATION PLATFORM</div>
+              </div>
+            </a>
+            <a href="/landing" style={{ fontSize: 12, color: "var(--text-4)", fontWeight: 600, textDecoration: "none", whiteSpace: "nowrap" }}>← See examples</a>
           </div>
 
           <div style={{ marginBottom: 22 }}>
