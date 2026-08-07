@@ -47,6 +47,12 @@ export default async function handler(req, res) {
     if (billing.free_observations_used >= FREE_LIMIT) {
       return res.status(402).json({ allowed: false, reason: "trial_exhausted", freeUsed: billing.free_observations_used, freeLimit: FREE_LIMIT });
     }
+    // Observation #1 is always free, no card. From #2 on, a card on file is
+    // required (not charged) before the trial continues — the actual abuse
+    // deterrent; observations 2-3 stay free once that card is added.
+    if (billing.free_observations_used >= 1 && !billing.has_payment_method) {
+      return res.status(402).json({ allowed: false, reason: "card_required", freeUsed: billing.free_observations_used, freeLimit: FREE_LIMIT });
+    }
     const nextCount = billing.free_observations_used + 1;
     await supabaseAdmin.from("billing_accounts")
       .update({ free_observations_used: nextCount, updated_at: new Date().toISOString() })

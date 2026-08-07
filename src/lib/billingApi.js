@@ -40,6 +40,11 @@ export async function startCheckout(plan) {
   window.location.href = data.url;
 }
 
+// $0 today — just saves a card so the free trial can continue past observation #1.
+export async function startCardSetup() {
+  return startCheckout("card_setup");
+}
+
 export async function openBillingPortal() {
   const { ok, data } = await authedFetch("/api/create-portal-session", {});
   if (!ok || !data.url) throw new Error(data.error || "Could not open billing portal.");
@@ -47,12 +52,14 @@ export async function openBillingPortal() {
 }
 
 // The authoritative usage gate — call before every AI analysis. Resolves the
-// structured result on both success and a 402 "trial exhausted" response, so
-// the caller can branch on `allowed` instead of catching an exception for the
+// structured result on both success and a 402 response, so the caller can
+// branch on `allowed`/`reason` instead of catching an exception for the
 // expected/common case; only genuine errors (network, 401, 500) throw.
+// reason is "card_required" (observation 2-3, no card on file yet) or
+// "trial_exhausted" (all 3 free observations used) when allowed is false.
 export async function checkObservationAllowance() {
   const { ok, status, data } = await authedFetch("/api/track-observation", {});
-  if (status === 402) return data; // { allowed: false, reason: "trial_exhausted", freeUsed, freeLimit }
+  if (status === 402) return data;
   if (!ok) throw new Error(data.error || `Request failed (${status})`);
   return data; // { allowed: true, plan, ... }
 }

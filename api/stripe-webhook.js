@@ -59,6 +59,21 @@ export default async function handler(req, res) {
             billing_period_observations: 0,
             updated_at: new Date().toISOString(),
           }).eq("user_id", userId);
+        } else if (plan === "card_setup") {
+          // Unlocks observations 2-3 of the free trial — nothing charged.
+          // Make it the default payment method too, so if this user later
+          // upgrades to a real plan, that Checkout doesn't ask for a card again.
+          if (session.setup_intent) {
+            const setupIntent = await stripe.setupIntents.retrieve(session.setup_intent);
+            if (setupIntent.payment_method) {
+              await stripe.customers.update(session.customer, {
+                invoice_settings: { default_payment_method: setupIntent.payment_method },
+              });
+            }
+          }
+          await supabaseAdmin.from("billing_accounts")
+            .update({ has_payment_method: true, updated_at: new Date().toISOString() })
+            .eq("user_id", userId);
         }
         break;
       }

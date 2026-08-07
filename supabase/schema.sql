@@ -317,3 +317,50 @@ create trigger on_profile_created_billing
 insert into public.billing_accounts (user_id)
 select id from public.profiles
 on conflict (user_id) do nothing;
+
+-- ─────────────────────────────────────────────────────────────────
+-- ClassroomLens Pro — Free-trial abuse prevention
+--
+-- 1. Disposable email domains are rejected at signup via a BEFORE INSERT
+--    trigger directly on auth.users. This is a plain Postgres trigger
+--    (not Supabase's separate "Auth Hooks" feature) — RAISE EXCEPTION in
+--    a BEFORE trigger aborts the whole insert, so the account is never
+--    created and Supabase's signUp() call returns an error to the client.
+--    This is the same mechanism already used for on_auth_user_created,
+--    just BEFORE instead of AFTER and able to block instead of just react.
+--
+-- 2. billing_accounts.has_payment_method gates observation #2 onward on
+--    having a card on file (added via a $0 Stripe Checkout "setup mode"
+--    session) — observation #1 stays completely free with no card.
+--
+-- Run this once. Then separately run disposable_domains_seed.sql (a
+-- large data-only file, ~8,200 rows) to populate the blocklist — kept
+-- out of this file so it doesn't dominate every future diff/review here.
+-- ─────────────────────────────────────────────────────────────────
+
+create table if not exists public.disposable_email_domains (
+  domain text primary key
+);
+-- No client grants at all — this table is only ever read from inside the
+-- security-definer trigger function below, never queried directly by the
+-- client (would leak the blocklist for zero benefit).
+
+create or replace function public.reject_disposable_email()
+returns trigger
+language plpgsql security definer set search_path = public as $$
+declare v_domain text;
+begin
+  v_domain := lower(split_part(new.email, '@', 2));
+  if exists (select 1 from public.disposable_email_domains where domain = v_domain) then
+    raise exception 'Please sign up with a permanent email address — disposable/temporary email domains are not accepted.';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists reject_disposable_email_trigger on auth.users;
+create trigger reject_disposable_email_trigger
+  before insert on auth.users
+  for each row execute function public.reject_disposable_email();
+
+alter table public.billing_accounts add column if not exists has_payment_method boolean not null default false;

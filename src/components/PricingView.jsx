@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Card, Btn, Icon } from "./ui.jsx";
-import { startCheckout } from "../lib/billingApi.js";
+import { startCheckout, startCardSetup } from "../lib/billingApi.js";
 
 const PLANS = [
   {
@@ -31,14 +31,26 @@ export function PricingView({ mode = "intro", onDismiss, freeUsed = 0, freeLimit
     }
   };
 
+  const addCard = async () => {
+    setErr(""); setLoadingPlan("card_setup");
+    try {
+      await startCardSetup(); // redirects to Stripe on success
+    } catch (e) {
+      setErr(e.message);
+      setLoadingPlan(null);
+    }
+  };
+
   const isPaywall = mode === "paywall";
+  const isCardRequired = mode === "card-required";
+  const dismissible = mode !== "paywall" && onDismiss;
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.55)", backdropFilter: "blur(2px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200, padding: 24, overflowY: "auto" }}>
       <div style={{ maxWidth: 760, width: "100%", margin: "40px 0" }}>
         <Card style={{ boxShadow: "var(--shadow-lg)", padding: 32, position: "relative" }}>
-          {!isPaywall && onDismiss && (
-            <button onClick={onDismiss} title="Continue with free trial"
+          {dismissible && (
+            <button onClick={onDismiss} title="Close"
               style={{ position: "absolute", top: 18, right: 18, background: "transparent", border: "none", color: "var(--text-5)", cursor: "pointer", fontSize: 18 }}>
               ✕
             </button>
@@ -55,15 +67,32 @@ export function PricingView({ mode = "intro", onDismiss, freeUsed = 0, freeLimit
                   Choose a plan to keep analyzing observations. Your {freeUsed} free observations and their analyses are still saved to your account.
                 </p>
               </>
+            ) : isCardRequired ? (
+              <>
+                <div style={{ fontSize: 20, fontWeight: 800, color: "var(--text)", marginBottom: 8 }}>Add a card to keep exploring — free</div>
+                <p style={{ fontSize: 13, color: "var(--text-4)", maxWidth: 460, margin: "0 auto" }}>
+                  Your first observation was on us. Adding a card unlocks your remaining {freeLimit - freeUsed} free observation{freeLimit - freeUsed === 1 ? "" : "s"} —
+                  nothing is charged unless you choose a plan afterward.
+                </p>
+              </>
             ) : (
               <>
                 <div style={{ fontSize: 20, fontWeight: 800, color: "var(--text)", marginBottom: 8 }}>Choose your plan</div>
                 <p style={{ fontSize: 13, color: "var(--text-4)", maxWidth: 460, margin: "0 auto" }}>
-                  Every account gets {freeLimit} free observations to try ClassroomLens before paying anything — no card required to start.
+                  Your first observation is free, no card needed. Adding a card after that keeps your remaining {freeLimit - 1} free observations unlocked.
                 </p>
               </>
             )}
           </div>
+
+          {isCardRequired && (
+            <div style={{ background: "var(--accent-soft)", border: "1px solid #4f46e522", borderRadius: 12, padding: 20, marginBottom: 20, textAlign: "center" }}>
+              <Btn size="lg" disabled={loadingPlan !== null} onClick={addCard} style={{ marginBottom: 10 }}>
+                {loadingPlan === "card_setup" ? "Redirecting to Stripe…" : "💳 Add Card — $0 Charged Today"}
+              </Btn>
+              <p style={{ fontSize: 11, color: "var(--text-4)" }}>Or choose a plan below to skip the rest of the trial entirely.</p>
+            </div>
+          )}
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 20 }}>
             {PLANS.map(p => (
@@ -105,8 +134,11 @@ export function PricingView({ mode = "intro", onDismiss, freeUsed = 0, freeLimit
               Need a <strong>District</strong> plan for multiple schools?{" "}
               <a href="mailto:anthonykc@gmail.com?subject=District%20Plan%20Inquiry" style={{ color: "var(--accent)", fontWeight: 600 }}>Contact us →</a>
             </div>
-            {!isPaywall && onDismiss && (
+            {mode === "intro" && onDismiss && (
               <Btn variant="ghost" size="sm" onClick={onDismiss}>Continue with Free Trial</Btn>
+            )}
+            {isCardRequired && onDismiss && (
+              <Btn variant="ghost" size="sm" onClick={onDismiss}>Not now</Btn>
             )}
           </div>
         </Card>

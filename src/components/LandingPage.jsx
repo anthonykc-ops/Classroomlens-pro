@@ -153,7 +153,7 @@ export function LandingPage({ isLoggedIn }) {
             <CTAButton href={appHref} variant="onDark">{heroCta} →</CTAButton>
             <CTAButton href="#examples" variant="onDarkOutline">See How It Works</CTAButton>
           </div>
-          <p style={{ fontSize: 12, color: "var(--sidebar-text)" }}>3 free observations · No credit card required</p>
+          <p style={{ fontSize: 12, color: "var(--sidebar-text)" }}>First observation free · No card required to start</p>
         </div>
       </div>
 
@@ -280,7 +280,7 @@ export function LandingPage({ isLoggedIn }) {
         <div style={{ textAlign: "center", maxWidth: 560, margin: "0 auto 44px" }}>
           <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.12em", color: "var(--accent)", marginBottom: 12 }}>PRICING</div>
           <h2 style={{ fontSize: 30, fontWeight: 800, color: "var(--text)", letterSpacing: "-0.01em", marginBottom: 12 }}>Simple pricing, built to scale with you</h2>
-          <p style={{ fontSize: 14, color: "var(--text-4)" }}>Your first 3 observations are free. No credit card required.</p>
+          <p style={{ fontSize: 14, color: "var(--text-4)" }}>Your first observation is free, no card required. Add a card afterward (not charged) to keep your remaining 2 free.</p>
         </div>
         <div className="cl-land-pricing">
           {PRICING.map(p => (
@@ -315,7 +315,7 @@ export function LandingPage({ isLoggedIn }) {
       <div style={{ background: "var(--sidebar-bg)", marginTop: 100, position: "relative", overflow: "hidden" }}>
         <div className="cl-land-glow-a" />
         <div style={{ position: "relative", maxWidth: 620, margin: "0 auto", padding: "72px 24px", textAlign: "center" }}>
-          <h2 style={{ fontSize: 28, fontWeight: 800, color: "#fff", letterSpacing: "-0.01em", marginBottom: 14 }}>Try your first 3 observations free</h2>
+          <h2 style={{ fontSize: 28, fontWeight: 800, color: "#fff", letterSpacing: "-0.01em", marginBottom: 14 }}>Try your first observation free</h2>
           <p style={{ fontSize: 14, color: "var(--sidebar-text)", marginBottom: 28 }}>No credit card required. Set up your first observation in under five minutes.</p>
           <CTAButton href={appHref} variant="onDark">{heroCta} →</CTAButton>
         </div>

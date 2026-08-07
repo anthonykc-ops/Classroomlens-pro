@@ -19,8 +19,8 @@ export default async function handler(req, res) {
   if (!user) return res.status(401).json({ error: "Not authenticated" });
 
   const { plan } = req.body || {};
-  const priceId = PRICE_IDS[plan];
-  if (!priceId) return res.status(400).json({ error: "Invalid plan" });
+  const isCardSetup = plan === "card_setup";
+  if (!isCardSetup && !PRICE_IDS[plan]) return res.status(400).json({ error: "Invalid plan" });
 
   try {
     const { data: billing } = await supabaseAdmin
@@ -42,15 +42,27 @@ export default async function handler(req, res) {
     }
 
     const origin = req.headers.origin || `https://${req.headers.host}`;
-    const session = await stripe.checkout.sessions.create({
-      mode: "subscription",
-      customer: customerId,
-      line_items: [{ price: priceId, quantity: 1 }],
-      success_url: `${origin}/app?checkout=success`,
-      cancel_url: `${origin}/app?checkout=cancelled`,
-      metadata: { supabase_user_id: user.id, plan },
-      subscription_data: { metadata: { supabase_user_id: user.id, plan } },
-    });
+
+    // "card_setup" collects a payment method with nothing charged today — this
+    // is what unlocks observations 2-3 of the free trial. Choosing an actual
+    // plan (payg/unlimited) always goes through normal subscription Checkout.
+    const session = isCardSetup
+      ? await stripe.checkout.sessions.create({
+          mode: "setup",
+          customer: customerId,
+          success_url: `${origin}/app?checkout=card-added`,
+          cancel_url: `${origin}/app?checkout=cancelled`,
+          metadata: { supabase_user_id: user.id, plan: "card_setup" },
+        })
+      : await stripe.checkout.sessions.create({
+          mode: "subscription",
+          customer: customerId,
+          line_items: [{ price: PRICE_IDS[plan], quantity: 1 }],
+          success_url: `${origin}/app?checkout=success`,
+          cancel_url: `${origin}/app?checkout=cancelled`,
+          metadata: { supabase_user_id: user.id, plan },
+          subscription_data: { metadata: { supabase_user_id: user.id, plan } },
+        });
 
     return res.status(200).json({ url: session.url });
   } catch (e) {

@@ -2642,7 +2642,8 @@ function SettingsView({ apiKey, onChangeKey, onClearSessions, sessionCount, lega
         {(!billing || billing.plan === "trial") && (
           <>
             <p style={{ fontSize: 13, color: "var(--text-2)", marginBottom: 14 }}>
-              {billing?.free_observations_used ?? 0} of 3 free observations used. Choose a plan any time to keep analyzing after that.
+              {billing?.free_observations_used ?? 0} of 3 free observations used
+              {billing?.free_observations_used >= 1 && !billing?.has_payment_method ? " — add a card to unlock the rest, or choose a plan." : ". Choose a plan any time."}
             </p>
             <Btn onClick={onOpenPricing}>View Plans</Btn>
           </>
@@ -3060,7 +3061,7 @@ export default function App() {
   // Billing: undefined -> not resolved yet, object -> the billing_accounts row.
   const [billing, setBilling] = useState(undefined);
   const [showPricingIntro, setShowPricingIntro] = useState(false);
-  const [showPaywall, setShowPaywall] = useState(false);
+  const [showPaywall, setShowPaywall] = useState(null); // null | "card-required" | "paywall"
   const [checkoutNotice, setCheckoutNotice] = useState("");
 
   const refreshBilling = useCallback(async () => {
@@ -3095,11 +3096,15 @@ export default function App() {
     if (checkout === "success") {
       setCheckoutNotice("🎉 Payment successful! Activating your plan…");
       setTimeout(() => { refreshBilling(); setCheckoutNotice(""); }, 2000);
+    } else if (checkout === "card-added") {
+      setCheckoutNotice("✓ Card added — your free trial continues, nothing was charged.");
+      setTimeout(() => { refreshBilling(); setCheckoutNotice(""); }, 2000);
+      setShowPaywall(null);
     }
   }, [refreshBilling]);
 
   const handleUsageChecked = useCallback((result) => {
-    if (!result.allowed) setShowPaywall(true);
+    if (!result.allowed) setShowPaywall(result.reason === "card_required" ? "card-required" : "paywall");
     refreshBilling();
   }, [refreshBilling]);
 
@@ -3358,9 +3363,9 @@ export default function App() {
       )}
       {showPaywall && (
         <PricingView
-          mode="paywall"
-          freeUsed={billing?.free_observations_used || 3}
-          onDismiss={() => setShowPaywall(false)}
+          mode={showPaywall}
+          freeUsed={billing?.free_observations_used || 0}
+          onDismiss={() => setShowPaywall(null)}
         />
       )}
     </div>

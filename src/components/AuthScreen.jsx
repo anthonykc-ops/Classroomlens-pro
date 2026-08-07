@@ -76,7 +76,7 @@ function MarketingPanel() {
 
         <div style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "rgba(129,140,248,0.14)", border: "1px solid rgba(129,140,248,0.28)", borderRadius: 999, padding: "8px 16px", marginTop: 32, alignSelf: "flex-start" }}>
           <span style={{ fontSize: 14 }}>✦</span>
-          <span style={{ fontSize: 12, fontWeight: 700, color: "#e0e7ff" }}>3 free observations — no credit card required</span>
+          <span style={{ fontSize: 12, fontWeight: 700, color: "#e0e7ff" }}>Your first observation is free — no card required</span>
         </div>
       </div>
     </div>
@@ -137,7 +137,16 @@ export function AuthScreen() {
         setMsg("Password reset email sent. Check your inbox.");
       }
     } catch (e2) {
-      setErr(e2.message || "Something went wrong.");
+      // Disposable-email signups are rejected by a database trigger (see
+      // reject_disposable_email in schema.sql) — Supabase sometimes wraps that
+      // exception in a generic "Database error saving new user" message rather
+      // than passing our custom text through, so normalize either form here.
+      const raw = e2.message || "";
+      if (/disposable|temporary email|permanent email|Database error saving new user/i.test(raw)) {
+        setErr("Please sign up with a permanent email address — disposable/temporary email services aren't supported.");
+      } else {
+        setErr(raw || "Something went wrong.");
+      }
     }
     setLoading(false);
   };
@@ -146,7 +155,7 @@ export function AuthScreen() {
   const subheading = mode === "signin"
     ? "Sign in to pick up right where you left off."
     : mode === "signup"
-      ? "Start your free trial — no credit card required."
+      ? "Your first observation is free — no card required to start."
       : "We'll email you a link to reset it.";
 
   return (
@@ -228,7 +237,7 @@ export function AuthScreen() {
 
               {mode === "signup" && (
                 <p style={{ fontSize: 11, color: "var(--text-5)", textAlign: "center", marginTop: 12 }}>
-                  🔒 No credit card required · Cancel anytime
+                  🔒 First observation free, no card needed
                 </p>
               )}
             </form>

@@ -43,7 +43,10 @@ npm install
    Also open the SQL Editor in your Supabase dashboard, paste in the contents
    of `supabase/schema.sql` from this repo, and run it once — this creates
    the `sessions` table and the Row Level Security policies that keep each
-   user's observations private to their own account.
+   user's observations private to their own account. Then also run
+   `supabase/disposable_domains_seed.sql` (a separate, data-only file —
+   ~8,200 known throwaway-email domains — kept out of schema.sql so it
+   doesn't dominate every future diff there) to power the signup blocklist.
 4. **Anthropic** (AI analysis): get a free key at https://console.anthropic.com
    and paste it into `VITE_ANTHROPIC_API_KEY`
 5. Save the file
