@@ -76,7 +76,7 @@ function MarketingPanel() {
 
         <div style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "rgba(129,140,248,0.14)", border: "1px solid rgba(129,140,248,0.28)", borderRadius: 999, padding: "8px 16px", marginTop: 32, alignSelf: "flex-start" }}>
           <span style={{ fontSize: 14 }}>✦</span>
-          <span style={{ fontSize: 12, fontWeight: 700, color: "#e0e7ff" }}>Free 14-day trial — no credit card required</span>
+          <span style={{ fontSize: 12, fontWeight: 700, color: "#e0e7ff" }}>3 free observations — no credit card required</span>
         </div>
       </div>
     </div>

@@ -2,9 +2,11 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { useAuth } from "./lib/auth.jsx";
 import { AuthScreen } from "./components/AuthScreen.jsx";
 import { LandingPage } from "./components/LandingPage.jsx";
+import { PricingView } from "./components/PricingView.jsx";
 import { Chip, Card, Label, Btn, TextInput, Spinner, ScoreRing, Waveform, RatingBar, EmptyState, Icon } from "./components/ui.jsx";
 import * as sessionsApi from "./lib/sessionsApi.js";
 import * as orgApi from "./lib/orgApi.js";
+import { getBillingAccount, checkObservationAllowance, hasSeenPricingIntro, markPricingIntroSeen, openBillingPortal } from "./lib/billingApi.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GLOBAL STYLES
@@ -711,7 +713,7 @@ function mergeTranscriptAndNotes(entries, notes) {
   return lines.join("\n");
 }
 
-function RecordView({ apiKey, onAnalyze }) {
+function RecordView({ apiKey, onAnalyze, onUsageChecked }) {
   const [meta, setMeta] = useState({ teacher: "", grade: "", subject: "", date: new Date().toISOString().split("T")[0], observer: "", school: "" });
   const [framework, setFramework] = useState("danielson");
   const [mode, setMode] = useState("manual");
@@ -847,6 +849,23 @@ function RecordView({ apiKey, onAnalyze }) {
     if (!text) { setErr("Please record or paste a transcript first."); return; }
     if (text.split(" ").length < 20) { setErr("Transcript too short. Please provide at least a few minutes of conversation."); return; }
     setErr(""); setLoading(true);
+
+    // Authoritative billing gate — runs before the (paid, user-owned-key) Claude
+    // call so a trial user who's out of free observations never even fires it.
+    let allowance;
+    try {
+      allowance = await checkObservationAllowance();
+      onUsageChecked?.(allowance);
+    } catch (e) {
+      setErr("Couldn't verify your plan: " + e.message);
+      setLoading(false);
+      return;
+    }
+    if (!allowance.allowed) {
+      setLoading(false);
+      return; // parent shows the paywall via onUsageChecked
+    }
+
     let result;
     try {
       result = await analyzeObservation(apiKey, text, framework);
@@ -2579,11 +2598,15 @@ function SessionsList({ sessions, loading, currentUserId, onSelect, onDelete }) 
 // ─────────────────────────────────────────────────────────────────────────────
 // SETTINGS VIEW
 // ─────────────────────────────────────────────────────────────────────────────
-function SettingsView({ apiKey, onChangeKey, onClearSessions, sessionCount, legacyCount, onImportLegacy }) {
+const PLAN_LABEL = { trial: "Free Trial", payg: "Pay As You Go", unlimited: "Unlimited" };
+
+function SettingsView({ apiKey, onChangeKey, onClearSessions, sessionCount, legacyCount, onImportLegacy, billing, onOpenPricing }) {
   const [newKey, setNewKey] = useState("");
   const [testing, setTesting] = useState(false);
   const [msg, setMsg] = useState("");
   const [importing, setImporting] = useState(false);
+  const [portalLoading, setPortalLoading] = useState(false);
+  const [portalErr, setPortalErr] = useState("");
 
   const saveKey = async () => {
     if (!newKey.trim()) return;
@@ -2598,8 +2621,67 @@ function SettingsView({ apiKey, onChangeKey, onClearSessions, sessionCount, lega
     setTesting(false);
   };
 
+  const manageSubscription = async () => {
+    setPortalLoading(true); setPortalErr("");
+    try {
+      await openBillingPortal(); // redirects on success
+    } catch (e) {
+      setPortalErr(e.message);
+      setPortalLoading(false);
+    }
+  };
+
   return (
     <div className="fade-up" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <Card style={{ borderTop: "3px solid var(--accent)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 10, marginBottom: 14 }}>
+          <Label>Plan & Billing</Label>
+          <Chip label={PLAN_LABEL[billing?.plan] || "Free Trial"} color={billing?.plan === "unlimited" ? "var(--accent)" : billing?.plan === "payg" ? "var(--success)" : "var(--text-4)"} size="md" />
+        </div>
+
+        {(!billing || billing.plan === "trial") && (
+          <>
+            <p style={{ fontSize: 13, color: "var(--text-2)", marginBottom: 14 }}>
+              {billing?.free_observations_used ?? 0} of 3 free observations used. Choose a plan any time to keep analyzing after that.
+            </p>
+            <Btn onClick={onOpenPricing}>View Plans</Btn>
+          </>
+        )}
+
+        {billing?.plan === "payg" && (
+          <>
+            <p style={{ fontSize: 13, color: "var(--text-2)", marginBottom: 14 }}>
+              $19.99/year base fee + $1.00 per observation. <strong>{billing.billing_period_observations}</strong> observation{billing.billing_period_observations === 1 ? "" : "s"} analyzed this billing period.
+            </p>
+            <Btn onClick={manageSubscription} disabled={portalLoading}>
+              {portalLoading ? <span style={{ display:"flex",gap:8,alignItems:"center" }}><Spinner size={14}/>Opening…</span> : "Manage Subscription"}
+            </Btn>
+          </>
+        )}
+
+        {billing?.plan === "unlimited" && (
+          <>
+            <p style={{ fontSize: 13, color: "var(--text-2)", marginBottom: 14 }}>
+              $39.99/year, unlimited observations. <strong>{billing.billing_period_observations}</strong> analyzed so far.
+            </p>
+            <Btn onClick={manageSubscription} disabled={portalLoading}>
+              {portalLoading ? <span style={{ display:"flex",gap:8,alignItems:"center" }}><Spinner size={14}/>Opening…</span> : "Manage Subscription"}
+            </Btn>
+          </>
+        )}
+
+        {billing?.subscription_status === "past_due" && (
+          <div style={{ background: "var(--warning-soft)", border: "1px solid #d9770622", borderRadius: 8, padding: "10px 14px", fontSize: 12, color: "var(--warning)", marginTop: 12 }}>
+            Your last payment failed. Update your payment method via "Manage Subscription" to avoid losing access.
+          </div>
+        )}
+        {portalErr && <p style={{ fontSize: 12, color: "var(--danger)", marginTop: 10 }}>{portalErr}</p>}
+
+        <p style={{ fontSize: 11, color: "var(--text-5)", marginTop: 14 }}>
+          Need a District plan for multiple schools? <a href="mailto:anthonykc@gmail.com?subject=District%20Plan%20Inquiry" style={{ color: "var(--accent)" }}>Contact us →</a>
+        </p>
+      </Card>
+
       <Card>
         <Label>API Key</Label>
         <div style={{ fontSize: 12, color: "var(--text-3)", marginBottom: 12 }}>
@@ -2975,6 +3057,52 @@ export default function App() {
     return () => { cancelled = true; };
   }, [user]);
 
+  // Billing: undefined -> not resolved yet, object -> the billing_accounts row.
+  const [billing, setBilling] = useState(undefined);
+  const [showPricingIntro, setShowPricingIntro] = useState(false);
+  const [showPaywall, setShowPaywall] = useState(false);
+  const [checkoutNotice, setCheckoutNotice] = useState("");
+
+  const refreshBilling = useCallback(async () => {
+    if (!user) return;
+    try {
+      setBilling(await getBillingAccount(user.id));
+    } catch {
+      // billing_accounts row should always exist (created by trigger on signup);
+      // leave billing as-is on a transient fetch error rather than blocking the app.
+    }
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) { setBilling(undefined); return; }
+    refreshBilling();
+  }, [user, refreshBilling]);
+
+  // Show the "choose a plan" intro once per browser, only for trial users, and
+  // only after we actually know their billing state (avoids a flash on load).
+  useEffect(() => {
+    if (billing && billing.plan === "trial" && !hasSeenPricingIntro()) {
+      setShowPricingIntro(true);
+    }
+  }, [billing]);
+
+  // Returning from Stripe Checkout — the webhook usually lands before this redirect
+  // completes, but give it a moment before refreshing so the plan shows correctly.
+  useEffect(() => {
+    const checkout = new URLSearchParams(window.location.search).get("checkout");
+    if (!checkout) return;
+    window.history.replaceState({}, "", window.location.pathname);
+    if (checkout === "success") {
+      setCheckoutNotice("🎉 Payment successful! Activating your plan…");
+      setTimeout(() => { refreshBilling(); setCheckoutNotice(""); }, 2000);
+    }
+  }, [refreshBilling]);
+
+  const handleUsageChecked = useCallback((result) => {
+    if (!result.allowed) setShowPaywall(true);
+    refreshBilling();
+  }, [refreshBilling]);
+
   // Load sessions once we know whether this user is a principal (school-wide) or not (own only).
   useEffect(() => {
     if (!user || org === undefined) return;
@@ -3174,22 +3302,40 @@ export default function App() {
             <div style={{ fontSize: 19, fontWeight: 800, color: "var(--text)", letterSpacing: "-0.01em" }}>{meta.title}</div>
             <div style={{ fontSize: 12, color: "var(--text-4)", marginTop: 2 }}>{meta.subtitle}</div>
           </div>
-          {activeSession && (
-            <div style={{ fontSize: 11, color: "var(--text-3)", background: "var(--accent-soft)", border: "1px solid #4f46e522", borderRadius: 7, padding: "5px 12px" }}>
-              Active session: <strong style={{ color: "var(--accent)" }}>{activeSession.meta.teacher || "Untitled"}</strong>
-            </div>
-          )}
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            {billing?.plan === "trial" && (
+              <div style={{ fontSize: 11, color: "var(--text-3)", background: "var(--warning-soft)", border: "1px solid #d9770622", borderRadius: 7, padding: "5px 12px" }}>
+                🎁 {billing.free_observations_used} of 3 free observations used
+              </div>
+            )}
+            {billing?.plan === "payg" && (
+              <div style={{ fontSize: 11, color: "var(--text-3)", background: "var(--success-soft)", border: "1px solid #16a34a22", borderRadius: 7, padding: "5px 12px" }}>
+                💳 Pay As You Go · {billing.billing_period_observations} analyzed this period
+              </div>
+            )}
+            {billing?.plan === "unlimited" && <Chip label="Unlimited Plan" color="var(--accent)" size="md" />}
+            {activeSession && (
+              <div style={{ fontSize: 11, color: "var(--text-3)", background: "var(--accent-soft)", border: "1px solid #4f46e522", borderRadius: 7, padding: "5px 12px" }}>
+                Active session: <strong style={{ color: "var(--accent)" }}>{activeSession.meta.teacher || "Untitled"}</strong>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Content */}
         <div style={{ flex: 1, maxWidth: 1080, width: "100%", margin: "0 auto", padding: "28px 32px 80px" }}>
+          {checkoutNotice && (
+            <div style={{ background: "var(--success-soft)", border: "1px solid #16a34a22", borderRadius: 8, padding: "10px 14px", fontSize: 12, color: "var(--success)", marginBottom: 16 }}>
+              {checkoutNotice}
+            </div>
+          )}
           {sessionsError && (
             <div style={{ background: "var(--danger-soft)", border: "1px solid #dc262622", borderRadius: 8, padding: "10px 14px", fontSize: 12, color: "var(--danger)", marginBottom: 16 }}>
               Couldn't load your sessions from the cloud: {sessionsError}
             </div>
           )}
           {tab === "dashboard" && <DashboardView sessions={sessions} onSelect={s => { setActiveSession(s); setTab("analysis"); }} onNew={() => setTab("record")} />}
-          {tab === "record"    && <RecordView apiKey={apiKey} onAnalyze={handleAnalyze} />}
+          {tab === "record"    && <RecordView apiKey={apiKey} onAnalyze={handleAnalyze} onUsageChecked={handleUsageChecked} />}
           {tab === "analysis"  && <AnalysisView session={activeSession} apiKey={apiKey} />}
           {tab === "growth"    && <GrowthPlanView session={activeSession} />}
           {tab === "coaching"  && <CoachingView session={activeSession} apiKey={apiKey} />}
@@ -3199,9 +3345,24 @@ export default function App() {
           {tab === "lessonplan" && <LessonPlanView apiKey={apiKey} />}
           {tab === "sessions"  && <SessionsList sessions={sessions} loading={sessionsLoading} currentUserId={user.id} onSelect={s => { setActiveSession(s); setTab("analysis"); }} onDelete={deleteSession} />}
           {tab === "organization" && <OrganizationView user={user} org={org} school={school} onOrgChange={refreshOrg} />}
-          {tab === "settings"  && <SettingsView apiKey={apiKey} onChangeKey={setApiKey} onClearSessions={clearSessions} sessionCount={sessions.length} legacyCount={legacyCount} onImportLegacy={importLegacySessions} />}
+          {tab === "settings"  && <SettingsView apiKey={apiKey} onChangeKey={setApiKey} onClearSessions={clearSessions} sessionCount={sessions.length} legacyCount={legacyCount} onImportLegacy={importLegacySessions} billing={billing} onOpenPricing={() => setShowPricingIntro(true)} />}
         </div>
       </div>
+
+      {showPricingIntro && (
+        <PricingView
+          mode="intro"
+          freeUsed={billing?.free_observations_used || 0}
+          onDismiss={() => { markPricingIntroSeen(); setShowPricingIntro(false); }}
+        />
+      )}
+      {showPaywall && (
+        <PricingView
+          mode="paywall"
+          freeUsed={billing?.free_observations_used || 3}
+          onDismiss={() => setShowPaywall(false)}
+        />
+      )}
     </div>
   );
 }

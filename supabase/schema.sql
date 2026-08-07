@@ -257,3 +257,63 @@ begin
 end;
 $$;
 grant execute on function public.remove_member(uuid) to authenticated;
+
+-- ─────────────────────────────────────────────────────────────────
+-- ClassroomLens Pro — Billing (Stripe: Pay As You Go / Unlimited)
+--
+-- One row per user, created automatically on signup with plan='trial'.
+-- IMPORTANT: this table is intentionally read-only to the client (grant
+-- select only). Every write — trial-count increments, plan changes,
+-- Stripe IDs — happens from the serverless functions in /api using the
+-- Supabase SERVICE ROLE key, which bypasses RLS. If a user could write
+-- this table with their own anon-key session, they could grant
+-- themselves an unlimited plan for free by calling the REST API
+-- directly. Do not add authenticated insert/update/delete grants here.
+--
+-- Run this once in your Supabase project (SQL Editor). Safe to re-run.
+-- ─────────────────────────────────────────────────────────────────
+
+create table if not exists public.billing_accounts (
+  user_id                        uuid primary key references public.profiles(id) on delete cascade,
+  plan                           text not null default 'trial' check (plan in ('trial','payg','unlimited')),
+  subscription_status            text not null default 'none' check (subscription_status in ('none','active','past_due','canceled')),
+  free_observations_used         int not null default 0,
+  billing_period_observations    int not null default 0,
+  has_seen_pricing_intro         boolean not null default false,
+  stripe_customer_id             text,
+  stripe_base_subscription_id    text, -- PAYG: $19.99/yr base fee subscription
+  stripe_metered_subscription_id text, -- PAYG: $1.00/observation metered subscription
+  stripe_metered_item_id         text, -- subscription item usage records attach to
+  stripe_unlimited_subscription_id text, -- Unlimited: $39.99/yr subscription
+  current_period_end             timestamptz,
+  created_at                     timestamptz not null default now(),
+  updated_at                     timestamptz not null default now()
+);
+alter table public.billing_accounts enable row level security;
+grant select on public.billing_accounts to authenticated;
+
+drop policy if exists "Users can view their own billing account" on public.billing_accounts;
+create policy "Users can view their own billing account"
+  on public.billing_accounts for select
+  using (user_id = auth.uid());
+
+-- Every new profile gets a trial billing account automatically.
+create or replace function public.handle_new_billing_account()
+returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  insert into public.billing_accounts (user_id) values (new.id)
+  on conflict (user_id) do nothing;
+  return new;
+end;
+$$;
+
+drop trigger if exists on_profile_created_billing on public.profiles;
+create trigger on_profile_created_billing
+  after insert on public.profiles
+  for each row execute function public.handle_new_billing_account();
+
+-- One-time backfill for accounts created before this migration existed.
+insert into public.billing_accounts (user_id)
+select id from public.profiles
+on conflict (user_id) do nothing;

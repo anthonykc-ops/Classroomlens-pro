@@ -95,7 +95,8 @@ The app opens automatically at: **http://localhost:3000**. Create an account
 | 🗣️ PLC Meeting Analyzer | Analyze PLC meetings for decisions, action items, collaborative inquiry, and norms adherence |
 | 📄 Lesson Plan Analyzer | Paste, upload, or record a lesson-plan walkthrough for framework-mapped feedback |
 | 📁 Session Storage | Synced to your account in the cloud — available on any device you log into |
-| ⚙️ Settings | Update API key, manage data |
+| 💳 Billing (Stripe) | 3 free observations, then Pay As You Go ($19.99/yr + $1/observation) or Unlimited ($39.99/yr) |
+| ⚙️ Settings | Update API key, manage data, manage subscription |
 
 *IEP, PLC, and Lesson Plan analyses are stateless — nothing from those three tools is saved to your account.*
 
@@ -108,11 +109,14 @@ The app opens automatically at: **http://localhost:3000**. Create an account
 2. Install Vercel CLI: `npm install -g vercel`
 3. Run `vercel` from the project folder
 4. Follow the prompts
-5. Add your environment variable:
-   - Go to your Vercel project → Settings → Environment Variables
-   - Add: `VITE_ANTHROPIC_API_KEY` = your key
+5. Add your environment variables — Vercel project → Settings → Environment Variables:
+   - `VITE_ANTHROPIC_API_KEY`, `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` (frontend)
+   - `STRIPE_SECRET_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `STRIPE_PRICE_PAYG_BASE`, `STRIPE_PRICE_PAYG_METERED`, `STRIPE_PRICE_UNLIMITED`, `STRIPE_WEBHOOK_SECRET` (billing — see `.env.example` for the full Stripe setup walkthrough)
 
 Your app will be live at a URL like: `https://classroomlens-pro.vercel.app`
+
+### Billing (Stripe) setup
+Billing runs through Vercel Serverless Functions in `/api` — these only execute once deployed to Vercel (or via `vercel dev` locally); plain `npm run dev` won't run them, so payment testing has to happen on a real deploy. Full step-by-step instructions (creating the Stripe products/prices, getting the service-role key, wiring the webhook) are in the commented-out section of `.env.example`. Start in Stripe **Test mode** — test card `4242 4242 4242 4242`, any future expiry/CVC — before switching to live keys.
 
 ---
 
@@ -151,7 +155,7 @@ Questions or feedback: **anthonykc@gmail.com**
 
 - [x] User accounts and cloud sync
 - [x] Organization/school roles for true cross-teacher admin dashboards
-- [ ] Subscription billing (Stripe) for the School Plan upgrade
+- [x] Subscription billing (Stripe) — Pay As You Go and Unlimited plans
 - [ ] PDF export for formal evaluations
 - [ ] Multi-school district dashboard
 - [ ] Custom framework builder
