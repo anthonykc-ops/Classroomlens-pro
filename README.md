@@ -33,17 +33,26 @@ cd classroomlens-pro
 npm install
 ```
 
-### Step 4 — Add your API Key
+### Step 4 — Set up your accounts (Supabase + Anthropic)
 1. Copy the file `.env.example` and rename it to `.env`
    (or run: `cp .env.example .env`)
 2. Open `.env` in any text editor
-3. Get your free API key at: https://console.anthropic.com
-4. Replace `sk-ant-your-key-goes-here` with your actual key
+3. **Supabase** (user accounts + cloud storage): create a free project at
+   https://supabase.com, then copy the Project URL and `anon public` key from
+   Settings → API into `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`.
+   Also open the SQL Editor in your Supabase dashboard, paste in the contents
+   of `supabase/schema.sql` from this repo, and run it once — this creates
+   the `sessions` table and the Row Level Security policies that keep each
+   user's observations private to their own account.
+4. **Anthropic** (AI analysis): get a free key at https://console.anthropic.com
+   and paste it into `VITE_ANTHROPIC_API_KEY`
 5. Save the file
 
 Your `.env` file should look like:
 ```
 VITE_ANTHROPIC_API_KEY=sk-ant-api03-xxxxxxxxxxxxxxxxxxxx
+VITE_SUPABASE_URL=https://xxxxxxxxxxxx.supabase.co
+VITE_SUPABASE_ANON_KEY=eyJxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ```
 
 ### Step 5 — Run the app
@@ -51,7 +60,8 @@ VITE_ANTHROPIC_API_KEY=sk-ant-api03-xxxxxxxxxxxxxxxxxxxx
 npm run dev
 ```
 
-The app opens automatically at: **http://localhost:3000**
+The app opens automatically at: **http://localhost:3000**. Create an account
+(or sign in) on the first screen — each teacher/admin gets their own login.
 
 ---
 
@@ -79,9 +89,15 @@ The app opens automatically at: **http://localhost:3000**
 | 🌱 Growth Plans | 3-tier growth plan: tomorrow, 2-week, long-term |
 | 💬 Coaching Conference | AI-guided pre/post observation conversations |
 | 📄 4 Report Types | Formal eval, teacher letter, admin summary, PD memo |
-| 🏫 Admin Dashboard | School-wide data and teacher support tracking |
-| 📁 Session Storage | All sessions saved locally, persistent between visits |
+| 🏫 Admin Dashboard | School-wide observation trends — principals see every teacher's observations in their school |
+| 🏢 Organization / School Plan | Principals create a school, invite teachers by code, and manage the team roster |
+| 🩺 IEP Meeting Analysis | Record or paste IEP meeting notes for AI-assisted strengths/needs, goal alignment, accommodations, and IDEA/FAPE compliance notes |
+| 🗣️ PLC Meeting Analyzer | Analyze PLC meetings for decisions, action items, collaborative inquiry, and norms adherence |
+| 📄 Lesson Plan Analyzer | Paste, upload, or record a lesson-plan walkthrough for framework-mapped feedback |
+| 📁 Session Storage | Synced to your account in the cloud — available on any device you log into |
 | ⚙️ Settings | Update API key, manage data |
+
+*IEP, PLC, and Lesson Plan analyses are stateless — nothing from those three tools is saved to your account.*
 
 ---
 
@@ -117,9 +133,9 @@ Your app will be live at a URL like: `https://classroomlens-pro.vercel.app`
 
 ## 🔒 Privacy & Data
 
-- All session data is stored **locally on your device** (localStorage)
+- Your login (email/password) is managed by Supabase, ClassroomLens's authentication provider
+- Session/observation data is stored in your own Supabase account, protected by Row Level Security so only you can read or write your rows
 - Transcripts are sent to Anthropic's API for analysis only
-- No data is stored on any external server by ClassroomLens
 - Your API key is stored locally in your browser only
 - See Anthropic's privacy policy: https://www.anthropic.com/privacy
 
@@ -133,7 +149,9 @@ Questions or feedback: **anthonykc@gmail.com**
 
 ## 🚀 Future Roadmap
 
-- [ ] User accounts and cloud sync
+- [x] User accounts and cloud sync
+- [x] Organization/school roles for true cross-teacher admin dashboards
+- [ ] Subscription billing (Stripe) for the School Plan upgrade
 - [ ] PDF export for formal evaluations
 - [ ] Multi-school district dashboard
 - [ ] Custom framework builder

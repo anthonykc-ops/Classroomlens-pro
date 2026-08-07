@@ -1,22 +1,40 @@
 import { useState, useRef, useEffect, useCallback } from "react";
+import { useAuth } from "./lib/auth.jsx";
+import { AuthScreen } from "./components/AuthScreen.jsx";
+import { Chip, Card, Label, Btn, TextInput, Spinner, ScoreRing, Waveform, RatingBar, EmptyState, Icon } from "./components/ui.jsx";
+import * as sessionsApi from "./lib/sessionsApi.js";
+import * as orgApi from "./lib/orgApi.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GLOBAL STYLES
 // ─────────────────────────────────────────────────────────────────────────────
 const css = `
-  @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+  :root{
+    --bg:#f8fafc; --surface:#ffffff; --surface-2:#f1f5f9; --surface-3:#e2e8f0;
+    --border:#e2e8f0; --border-strong:#cbd5e1;
+    --text:#0f172a; --text-2:#334155; --text-3:#475569; --text-4:#64748b; --text-5:#94a3b8; --text-faint:#cbd5e1;
+    --accent:#4f46e5; --accent-hover:#4338ca; --accent-soft:#eef2ff;
+    --success:#16a34a; --success-soft:#f0fdf4;
+    --warning:#d97706; --warning-soft:#fffbeb;
+    --danger:#dc2626; --danger-soft:#fef2f2;
+    --sidebar-bg:#0f172a; --sidebar-bg-2:#1e293b; --sidebar-text:#94a3b8; --sidebar-border:#1e293b;
+    --shadow-sm:0 1px 2px rgba(15,23,42,.05);
+    --shadow-md:0 1px 3px rgba(15,23,42,.08),0 1px 2px rgba(15,23,42,.04);
+    --shadow-lg:0 8px 24px rgba(15,23,42,.10),0 2px 6px rgba(15,23,42,.06);
+  }
   *{box-sizing:border-box;margin:0;padding:0;}
   html,body,#root{height:100%;}
-  body{background:#010409;color:#e6edf3;font-family:'Outfit',system-ui,sans-serif;}
-  ::-webkit-scrollbar{width:5px;height:5px;}
-  ::-webkit-scrollbar-track{background:#0d1117;}
-  ::-webkit-scrollbar-thumb{background:#30363d;border-radius:10px;}
+  body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;-webkit-font-smoothing:antialiased;}
+  ::-webkit-scrollbar{width:8px;height:8px;}
+  ::-webkit-scrollbar-track{background:transparent;}
+  ::-webkit-scrollbar-thumb{background:var(--border-strong);border-radius:10px;}
   input,textarea,select,button{font-family:inherit;}
   textarea{resize:vertical;}
+  input:focus,textarea:focus,select:focus{border-color:var(--accent)!important;box-shadow:0 0 0 3px var(--accent-soft);}
   @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
-  @keyframes fadeUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+  @keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
   @keyframes spin{to{transform:rotate(360deg)}}
-  @keyframes glow{0%,100%{box-shadow:0 0 12px #3b82f644}50%{box-shadow:0 0 24px #3b82f688}}
   .fade-up{animation:fadeUp .35s ease forwards;}
   .spin{animation:spin 1s linear infinite;}
   .rec-pulse{animation:pulse 1.4s ease infinite;}
@@ -294,14 +312,16 @@ const fmtTime = s => `${Math.floor(s/60).toString().padStart(2,"0")}:${Math.floo
 const ratingColors = { 1:"#ef4444", 2:"#f97316", 3:"#22c55e", 4:"#3b82f6", 5:"#8b5cf6" };
 const ratingColor = (r) => ratingColors[r] || "#475569";
 
-const STORAGE_KEY = "classroomlens_sessions_v2";
+// Sessions used to live in localStorage under this key before cloud sync (phase 2).
+// Kept around only so SettingsView can offer a one-time import into the user's account.
+const LEGACY_STORAGE_KEY = "classroomlens_sessions_v2";
 const APIKEY_STORAGE = "classroomlens_apikey";
 
-function loadSessions() {
-  try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]"); } catch { return []; }
+function loadLegacySessions() {
+  try { return JSON.parse(localStorage.getItem(LEGACY_STORAGE_KEY) || "[]"); } catch { return []; }
 }
-function saveSessions(sessions) {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions)); } catch {}
+function clearLegacySessions() {
+  try { localStorage.removeItem(LEGACY_STORAGE_KEY); } catch {}
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -449,124 +469,117 @@ Be direct, encouraging, and give one concrete next step. No bullet points — wr
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// UI PRIMITIVES
-// ─────────────────────────────────────────────────────────────────────────────
-function Chip({ label, color = "#475569", size = "sm" }) {
-  return (
-    <span style={{
-      background: color + "1a", color, border: `1px solid ${color}33`,
-      borderRadius: 4, padding: size === "sm" ? "2px 8px" : "4px 11px",
-      fontSize: size === "sm" ? 10 : 12, fontWeight: 700, letterSpacing: "0.05em",
-      textTransform: "uppercase", whiteSpace: "nowrap", display: "inline-block",
-    }}>{label}</span>
-  );
+async function analyzeIEPMeeting(apiKey, notesText, meta) {
+  const system = `You are an expert special education case manager and IDEA compliance specialist reviewing notes from an IEP meeting.
+Analyze the notes thoroughly and return ONLY valid JSON — no preamble, no markdown fences, no extra text.
+
+Required JSON structure (include ALL keys even if empty arrays):
+{
+  "summary": "2-3 sentence neutral summary of what was discussed and decided in this meeting",
+  "studentStrengths": ["specific strength grounded in the notes"],
+  "studentNeeds": ["specific need or area of concern grounded in the notes"],
+  "goalAlignment": [
+    { "goal": "goal name or area, e.g. Reading Fluency", "status": "on-track|needs-revision|new|unclear", "note": "1-2 sentence rationale tied to the notes" }
+  ],
+  "accommodationRecommendations": [
+    { "accommodation": "specific, concrete accommodation or modification", "rationale": "why this helps, tied to the student's documented needs" }
+  ],
+  "parentCommunication": ["specific, warm suggestion for how to communicate this meeting's outcomes to the family"],
+  "complianceNotes": [
+    { "area": "e.g. Present Levels (PLAAFP), Least Restrictive Environment, Timelines, Parental Consent, Prior Written Notice", "note": "specific observation about IDEA/FAPE compliance based on what is or isn't documented in the notes", "flag": "ok|watch|missing" }
+  ]
 }
 
-function Card({ children, style = {}, accent }) {
-  return (
-    <div style={{
-      background: "#0d1117", border: `1px solid ${accent ? accent + "44" : "#21262d"}`,
-      borderLeft: accent ? `3px solid ${accent}` : undefined,
-      borderRadius: 12, padding: 20, ...style,
-    }}>{children}</div>
-  );
+Ground every item in the actual notes provided — do not invent details. If the notes don't give enough information for a section, return fewer items rather than fabricating them. Compliance notes should flag gaps in documentation (e.g. missing present levels, unclear consent, no measurable goal criteria) as much as confirm what's present. This analysis supports the case manager's own judgment — it does not replace legal or clinical review.`;
+
+  const metaLine = [
+    meta?.meetingType && `Meeting type: ${meta.meetingType}`,
+    meta?.grade && `Grade: ${meta.grade}`,
+    meta?.date && `Date: ${meta.date}`,
+  ].filter(Boolean).join(" | ");
+
+  const text = await callClaude(apiKey, system, `${metaLine ? metaLine + "\n\n" : ""}IEP MEETING NOTES:\n${notesText}\n\nAnalyze these notes thoroughly.`, 3000);
+  return JSON.parse(text.replace(/```json|```/g, "").trim());
 }
 
-function Label({ children, color = "#475569" }) {
-  return <div style={{ fontSize: 10, color, fontWeight: 800, letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 12 }}>{children}</div>;
+async function analyzePLCMeeting(apiKey, notesText, meta) {
+  const system = `You are an expert instructional coach and PLC (Professional Learning Community) facilitator reviewing notes or a transcript from a PLC team meeting.
+Analyze the content thoroughly and return ONLY valid JSON — no preamble, no markdown fences, no extra text.
+
+Required JSON structure (include ALL keys even if empty arrays):
+{
+  "summary": "2-3 sentence neutral summary of what this PLC meeting covered",
+  "keyDecisions": ["specific decision the team made, grounded in the notes"],
+  "actionItems": [
+    { "item": "specific, concrete action item", "owner": "who owns it, or 'Unassigned' if unclear", "timeline": "when it's due, or 'Not specified' if unclear" }
+  ],
+  "collaborativeInquiryEvidence": ["specific example of the team using data, evidence, or shared inquiry to drive the discussion (as opposed to opinion or anecdote)"],
+  "teacherLearningGoals": ["professional learning goal or growth area identified for the team or individual teachers"],
+  "studentLearningNeeds": ["specific student learning need or gap surfaced during the discussion"],
+  "followUpRecommendations": ["concrete recommendation for what the next PLC meeting should address or follow up on"],
+  "goalAlignment": { "status": "aligned|partial|unclear", "note": "1-2 sentences on how this meeting connects to school/district improvement goals, based on what's in the notes" },
+  "normsObservations": [
+    { "area": "e.g. Equity of Voice, Time Management, Focus on Data, Active Listening, Solution-Oriented Talk", "note": "specific observation grounded in the notes", "flag": "strong|watch|concern" }
+  ]
 }
 
-function Btn({ children, onClick, variant = "primary", size = "md", disabled, full, style = {} }) {
-  const styles = {
-    primary: { background: disabled ? "#161b22" : "linear-gradient(135deg,#1d4ed8,#7c3aed)", color: disabled ? "#334155" : "#fff", border: "none" },
-    ghost:   { background: "transparent", color: "#64748b", border: "1px solid #30363d" },
-    success: { background: "transparent", color: "#22c55e", border: "1px solid #22c55e44" },
-    danger:  { background: "transparent", color: "#ef4444", border: "1px solid #ef444444" },
-    outline: { background: "transparent", color: "#93c5fd", border: "1px solid #3b82f644" },
-  };
-  const sizes = { sm: { padding: "5px 13px", fontSize: 11 }, md: { padding: "9px 18px", fontSize: 13 }, lg: { padding: "13px 28px", fontSize: 14 } };
-  return (
-    <button onClick={onClick} disabled={disabled}
-      style={{ ...styles[variant], ...sizes[size], borderRadius: 8, fontWeight: 700, cursor: disabled ? "not-allowed" : "pointer",
-        fontFamily: "inherit", letterSpacing: "0.02em", width: full ? "100%" : undefined,
-        transition: "opacity .15s, transform .1s", ...style }}>
-      {children}
-    </button>
-  );
+Ground every item in the actual notes/transcript provided — do not invent details. If the notes don't give enough information for a section, return fewer items rather than fabricating them. This analysis supports the facilitator's own reflection — it does not replace their judgment.`;
+
+  const metaLine = [
+    meta?.topic && `Meeting topic/focus: ${meta.topic}`,
+    meta?.team && `Team: ${meta.team}`,
+    meta?.facilitator && `Facilitator: ${meta.facilitator}`,
+    meta?.date && `Date: ${meta.date}`,
+  ].filter(Boolean).join(" | ");
+
+  const text = await callClaude(apiKey, system, `${metaLine ? metaLine + "\n\n" : ""}PLC MEETING NOTES:\n${notesText}\n\nAnalyze this meeting thoroughly.`, 3200);
+  return JSON.parse(text.replace(/```json|```/g, "").trim());
 }
 
-function TextInput({ label, value, onChange, type = "text", placeholder, style = {}, readOnly }) {
-  return (
-    <div style={style}>
-      {label && <div style={{ fontSize: 11, color: "#475569", marginBottom: 5, fontWeight: 600 }}>{label}</div>}
-      <input type={type} value={value} onChange={e => onChange?.(e.target.value)} placeholder={placeholder} readOnly={readOnly}
-        style={{ background: "#161b22", border: "1px solid #30363d", borderRadius: 7, padding: "9px 12px",
-          color: readOnly ? "#475569" : "#e6edf3", fontSize: 13, width: "100%", outline: "none" }} />
-    </div>
-  );
+async function analyzeLessonPlan(apiKey, planText, frameworkKey) {
+  const fw = FRAMEWORKS[frameworkKey];
+  const allComponents = Object.entries(fw.domains)
+    .flatMap(([, d]) => Object.entries(d.components).map(([ck, cn]) => `${ck}: ${cn}`))
+    .join("\n");
+
+  const system = `You are an expert instructional coach reviewing a WRITTEN LESSON PLAN (not a live observation) against the ${fw.name}.
+Analyze the plan thoroughly and return ONLY valid JSON — no preamble, no markdown fences, no extra text.
+
+Required JSON structure (include ALL keys):
+{
+  "summary": "2-3 sentence overview of the lesson plan and its overall readiness",
+  "dimensions": {
+    "standardsAlignment": { "rating": <1-4>, "notes": "how well the plan aligns to stated or implied standards/objectives" },
+    "instructionalDesign": { "rating": <1-4>, "notes": "quality of the lesson's structure, sequencing, and pedagogical soundness" },
+    "differentiation": { "rating": <1-4>, "notes": "how well the plan addresses diverse learners", "opportunities": ["specific missed differentiation opportunity"] },
+    "assessmentStrategy": { "rating": <1-4>, "notes": "quality and alignment of formative/summative assessment in the plan" }
+  },
+  "suggestions": ["specific, concrete suggestion to improve this lesson plan before teaching it"],
+  "evidence": {
+    "<component_key>": {
+      "rating": <number matching this framework's rating scale>,
+      "evidence": ["direct quote or close paraphrase from the plan"],
+      "feedback": "specific, actionable feedback in 1-2 sentences"
+    }
+  }
 }
 
-function Spinner({ size = 18 }) {
-  return <div className="spin" style={{ width: size, height: size, border: "2px solid #21262d", borderTopColor: "#3b82f6", borderRadius: "50%", display: "inline-block", flexShrink: 0 }} />;
-}
+Rating scale for the "dimensions" block is always 1=Needs Work, 2=Developing, 3=Solid, 4=Strong, regardless of framework.
+Rating scale for "evidence" entries uses this framework's own scale: ${Object.entries(fw.ratingScale).map(([k,v]) => `${k}=${v}`).join(", ")}.
 
-function ScoreRing({ value, max = 4, color, size = 68 }) {
-  const r = size / 2 - 7;
-  const circ = 2 * Math.PI * r;
-  const pct = value ? Math.min((value / max) * 100, 100) : 0;
-  return (
-    <div style={{ position: "relative", width: size, height: size, flexShrink: 0 }}>
-      <svg width={size} height={size} style={{ transform: "rotate(-90deg)" }}>
-        <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="#21262d" strokeWidth={6} />
-        <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={color} strokeWidth={6}
-          strokeDasharray={circ} strokeDashoffset={circ - (pct/100)*circ} strokeLinecap="round"
-          style={{ transition: "stroke-dashoffset 1s ease" }} />
-      </svg>
-      <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
-        <span style={{ fontSize: 16, fontWeight: 800, color, fontFamily: "'JetBrains Mono',monospace" }}>{value?.toFixed(1) || "—"}</span>
-      </div>
-    </div>
-  );
-}
+This is a WRITTEN PLAN, not a classroom observation — only include "evidence" entries for framework components that can reasonably be judged from a written plan (e.g. planning, outcomes, assessment design, coherence of instruction). Skip components that require observing live delivery, classroom environment, or in-the-moment student behavior — a plan cannot demonstrate those.
 
-function Waveform({ active, level = 0.5 }) {
-  const [bars, setBars] = useState(Array(30).fill(4));
-  useEffect(() => {
-    if (!active) { setBars(Array(30).fill(4)); return; }
-    const id = setInterval(() => setBars(prev => prev.map(() => active ? Math.random() * level * 36 + 4 : 4)), 90);
-    return () => clearInterval(id);
-  }, [active, level]);
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 3, height: 44, padding: "0 8px" }}>
-      {bars.map((h, i) => (
-        <div key={i} style={{ width: 3, height: h, background: active ? `hsl(${214 + i*3},76%,${55+i}%)` : "#21262d", borderRadius: 2, transition: "height .09s ease" }} />
-      ))}
-    </div>
-  );
-}
+FRAMEWORK COMPONENTS:
+${allComponents}`;
 
-function RatingBar({ value, max = 4, color = "#3b82f6" }) {
-  return (
-    <div style={{ background: "#21262d", borderRadius: 4, height: 5, overflow: "hidden" }}>
-      <div style={{ width: `${Math.max((value||0)/max*100,0)}%`, height: "100%", background: color, borderRadius: 4, transition: "width 1.2s ease" }} />
-    </div>
-  );
-}
-
-function EmptyState({ icon, text }) {
-  return (
-    <div style={{ textAlign: "center", padding: "80px 24px" }}>
-      <div style={{ fontSize: 44, marginBottom: 14, opacity: 0.4 }}>{icon}</div>
-      <p style={{ color: "#334155", fontSize: 14 }}>{text}</p>
-    </div>
-  );
+  const text = await callClaude(apiKey, system, `LESSON PLAN:\n${planText}\n\nAnalyze this lesson plan thoroughly.`, 3500);
+  return JSON.parse(text.replace(/```json|```/g, "").trim());
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // API KEY SETUP SCREEN
 // ─────────────────────────────────────────────────────────────────────────────
-function ApiKeySetup({ onSave }) {
+function ApiKeySetup({ onSave, user, onSignOut }) {
   const [key, setKey] = useState("");
   const [testing, setTesting] = useState(false);
   const [err, setErr] = useState("");
@@ -592,23 +605,31 @@ function ApiKeySetup({ onSave }) {
   };
 
   return (
-    <div style={{ minHeight: "100vh", background: "#010409", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+    <div style={{ minHeight: "100vh", background: "var(--bg)", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
       <div style={{ maxWidth: 520, width: "100%" }}>
+        {user && (
+          <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 10, marginBottom: 20 }}>
+            <div style={{ fontSize: 11, color: "var(--text-4)", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 6, padding: "3px 10px" }}>
+              Signed in as <strong style={{ color: "var(--text-2)" }}>{user.email}</strong>
+            </div>
+            <Btn size="sm" variant="ghost" onClick={onSignOut}>Sign Out</Btn>
+          </div>
+        )}
         <div style={{ textAlign: "center", marginBottom: 32 }}>
-          <div style={{ width: 56, height: 56, background: "linear-gradient(135deg,#1d4ed8,#7c3aed)", borderRadius: 14, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28, margin: "0 auto 16px" }}>🎓</div>
-          <h1 style={{ fontSize: 26, fontWeight: 800, color: "#e6edf3", marginBottom: 6 }}>ClassroomLens <span style={{ color: "#3b82f6" }}>Pro</span></h1>
-          <p style={{ fontSize: 14, color: "#475569" }}>AI-Powered Classroom Observation Platform</p>
+          <div style={{ width: 52, height: 52, background: "linear-gradient(135deg,#4f46e5,#4338ca)", borderRadius: 13, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px", boxShadow: "var(--shadow-md)" }}><Icon name="lens" size={26} /></div>
+          <h1 style={{ fontSize: 25, fontWeight: 800, color: "var(--text)", marginBottom: 6, letterSpacing: "-0.01em" }}>ClassroomLens <span style={{ color: "var(--accent)" }}>Pro</span></h1>
+          <p style={{ fontSize: 14, color: "var(--text-4)" }}>AI-Powered Classroom Observation Platform</p>
         </div>
 
-        <Card>
+        <Card style={{ boxShadow: "var(--shadow-lg)" }}>
           <Label>Connect Your AI Brain</Label>
-          <p style={{ fontSize: 13, color: "#64748b", lineHeight: 1.8, marginBottom: 20 }}>
+          <p style={{ fontSize: 13, color: "var(--text-3)", lineHeight: 1.8, marginBottom: 20 }}>
             ClassroomLens uses the Anthropic Claude API to analyze lessons and generate coaching feedback.
             Your key is stored locally on your device and never sent anywhere except Anthropic's servers.
           </p>
 
-          <div style={{ background: "#161b22", border: "1px solid #30363d", borderRadius: 8, padding: 14, marginBottom: 20 }}>
-            <div style={{ fontSize: 11, color: "#f59e0b", fontWeight: 700, marginBottom: 8 }}>HOW TO GET YOUR API KEY</div>
+          <div style={{ background: "var(--surface-2)", border: "1px solid var(--border)", borderRadius: 8, padding: 14, marginBottom: 20 }}>
+            <div style={{ fontSize: 11, color: "var(--warning)", fontWeight: 700, marginBottom: 8 }}>HOW TO GET YOUR API KEY</div>
             {[
               ["1", "Go to", "console.anthropic.com", "https://console.anthropic.com"],
               ["2", "Create an account (free)", "", ""],
@@ -616,39 +637,39 @@ function ApiKeySetup({ onSave }) {
               ["4", "Copy the key (starts with sk-ant-...)", "", ""],
               ["5", "Paste it below and click Connect", "", ""],
             ].map(([n, text, link, href]) => (
-              <div key={n} style={{ display: "flex", gap: 10, marginBottom: 6, fontSize: 12, color: "#94a3b8", alignItems: "center" }}>
-                <span style={{ background: "#3b82f622", color: "#3b82f6", borderRadius: "50%", width: 20, height: 20, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 800, flexShrink: 0 }}>{n}</span>
-                <span>{text} {link && <a href={href} target="_blank" rel="noreferrer" style={{ color: "#3b82f6" }}>{link}</a>}</span>
+              <div key={n} style={{ display: "flex", gap: 10, marginBottom: 6, fontSize: 12, color: "var(--text-2)", alignItems: "center" }}>
+                <span style={{ background: "var(--accent-soft)", color: "var(--accent)", borderRadius: "50%", width: 20, height: 20, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 800, flexShrink: 0 }}>{n}</span>
+                <span>{text} {link && <a href={href} target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>{link}</a>}</span>
               </div>
             ))}
           </div>
 
           <div style={{ marginBottom: 8 }}>
-            <div style={{ fontSize: 11, color: "#475569", marginBottom: 5, fontWeight: 600 }}>ANTHROPIC API KEY</div>
+            <div style={{ fontSize: 11, color: "var(--text-4)", marginBottom: 5, fontWeight: 600 }}>ANTHROPIC API KEY</div>
             <input
               type="password"
               value={key}
               onChange={e => setKey(e.target.value)}
               placeholder="sk-ant-api03-..."
               onKeyDown={e => e.key === "Enter" && test()}
-              style={{ background: "#161b22", border: "1px solid #30363d", borderRadius: 7, padding: "11px 14px", color: "#e6edf3", fontSize: 13, width: "100%", outline: "none", letterSpacing: "0.04em" }}
+              style={{ background: "var(--surface)", border: "1px solid var(--border-strong)", borderRadius: 7, padding: "11px 14px", color: "var(--text)", fontSize: 13, width: "100%", outline: "none", letterSpacing: "0.04em" }}
             />
           </div>
 
-          {err && <p style={{ fontSize: 12, color: "#ef4444", marginBottom: 10 }}>{err}</p>}
+          {err && <p style={{ fontSize: 12, color: "var(--danger)", marginBottom: 10 }}>{err}</p>}
 
           <Btn onClick={test} disabled={testing} full size="lg" style={{ marginTop: 4 }}>
             {testing ? <span style={{ display: "flex", alignItems: "center", gap: 10, justifyContent: "center" }}><Spinner />Testing connection…</span> : "Connect API Key →"}
           </Btn>
 
-          <p style={{ fontSize: 10, color: "#21262d", marginTop: 14, textAlign: "center", lineHeight: 1.6 }}>
+          <p style={{ fontSize: 10, color: "var(--text-5)", marginTop: 14, textAlign: "center", lineHeight: 1.6 }}>
             Cost: roughly $0.02–0.10 per analysis. Your key never leaves your browser except to reach Anthropic.
           </p>
         </Card>
 
         <div style={{ textAlign: "center", marginTop: 20 }}>
-          <p style={{ fontSize: 11, color: "#21262d" }}>
-            Need help? Email <a href="mailto:anthonykc@gmail.com" style={{ color: "#3b82f6" }}>anthonykc@gmail.com</a>
+          <p style={{ fontSize: 11, color: "var(--text-5)" }}>
+            Need help? Email <a href="mailto:anthonykc@gmail.com" style={{ color: "var(--accent)" }}>anthonykc@gmail.com</a>
           </p>
         </div>
       </div>
@@ -755,21 +776,35 @@ function RecordView({ apiKey, onAnalyze }) {
     if (!text) { setErr("Please record or paste a transcript first."); return; }
     if (text.split(" ").length < 20) { setErr("Transcript too short. Please provide at least a few minutes of conversation."); return; }
     setErr(""); setLoading(true);
+    let result;
     try {
-      const result = await analyzeObservation(apiKey, text, framework);
-      onAnalyze({ id: Date.now(), meta: { ...meta }, framework, transcript: text, analysis: result, timestamp: new Date().toLocaleString() });
+      result = await analyzeObservation(apiKey, text, framework);
     } catch (e) {
       setErr("Analysis failed: " + e.message + ". Check your API key in Settings.");
+      setLoading(false);
+      return;
+    }
+    try {
+      await onAnalyze({ meta: { ...meta }, framework, transcript: text, analysis: result });
+    } catch (e) {
+      setErr("Analysis succeeded but saving to your account failed: " + e.message);
     }
     setLoading(false);
   };
+
+  const StepLabel = ({ n, children }) => (
+    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+      <span style={{ width: 20, height: 20, borderRadius: "50%", background: "var(--accent-soft)", color: "var(--accent)", fontSize: 11, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{n}</span>
+      <span style={{ fontSize: 10, color: "var(--text-4)", fontWeight: 800, letterSpacing: "0.12em", textTransform: "uppercase" }}>{children}</span>
+    </div>
+  );
 
   return (
     <div className="fade-up" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       {/* Observation meta */}
       <Card>
-        <Label>Observation Details</Label>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+        <StepLabel n={1}>Observation Details</StepLabel>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
           <TextInput label="Teacher Name" value={meta.teacher} onChange={v => setMf("teacher", v)} />
           <TextInput label="Observer" value={meta.observer} onChange={v => setMf("observer", v)} />
           <TextInput label="School / Site" value={meta.school} onChange={v => setMf("school", v)} />
@@ -781,72 +816,76 @@ function RecordView({ apiKey, onAnalyze }) {
 
       {/* Framework selector */}
       <Card>
-        <Label>Evaluation Framework</Label>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 8, marginBottom: 12 }}>
+        <StepLabel n={2}>Evaluation Framework</StepLabel>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 8, marginBottom: 14 }}>
           {Object.entries(FRAMEWORKS).map(([key, f]) => (
             <div key={key} onClick={() => setFramework(key)}
-              style={{ background: framework===key ? f.color+"1a" : "#161b22", border: `2px solid ${framework===key ? f.color : "#21262d"}`,
-                borderRadius: 9, padding: "11px 10px", cursor: "pointer", textAlign: "center", transition: "all .15s" }}>
-              <div style={{ fontSize: 12, fontWeight: 800, color: framework===key ? f.color : "#475569" }}>{f.shortName}</div>
-              <div style={{ fontSize: 9, color: "#334155", marginTop: 3 }}>v{f.version}</div>
-              <div style={{ fontSize: 9, color: "#21262d", marginTop: 5, lineHeight: 1.4 }}>{f.usedIn}</div>
+              style={{ background: framework===key ? f.color+"12" : "var(--surface)", border: `1.5px solid ${framework===key ? f.color : "var(--border-strong)"}`,
+                borderRadius: 9, padding: "12px 10px", cursor: "pointer", textAlign: "center", transition: "all .15s", boxShadow: framework===key ? "var(--shadow-sm)" : "none" }}>
+              <div style={{ fontSize: 12, fontWeight: 800, color: framework===key ? f.color : "var(--text-3)" }}>{f.shortName}</div>
+              <div style={{ fontSize: 9, color: "var(--text-5)", marginTop: 3 }}>v{f.version}</div>
+              <div style={{ fontSize: 9, color: "var(--text-faint)", marginTop: 5, lineHeight: 1.4 }}>{f.usedIn}</div>
             </div>
           ))}
         </div>
         <div style={{ background: fw.color + "0d", border: `1px solid ${fw.color}22`, borderRadius: 7, padding: "9px 14px", fontSize: 12, color: fw.color }}>
-          <strong>{fw.name}</strong> <span style={{ color: "#475569", marginLeft: 8 }}>Rating scale: {Object.entries(fw.ratingScale).map(([k,v]) => `${k}–${v}`).join("  ·  ")}</span>
+          <strong>{fw.name}</strong> <span style={{ color: "var(--text-4)", marginLeft: 8 }}>Rating scale: {Object.entries(fw.ratingScale).map(([k,v]) => `${k}–${v}`).join("  ·  ")}</span>
         </div>
       </Card>
 
-      {/* Mode toggle */}
-      <div style={{ display: "flex", gap: 8 }}>
-        <Btn variant={mode==="manual"?"primary":"ghost"} size="sm" onClick={() => setMode("manual")}>✏️ Paste Transcript</Btn>
-        <Btn variant={mode==="live"?"primary":"ghost"} size="sm" onClick={() => setMode("live")}>🎙 Live Recording</Btn>
-      </div>
+      {/* Transcript */}
+      <Card>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10, marginBottom: 14 }}>
+          <StepLabel n={3}>Lesson Transcript</StepLabel>
+          <div style={{ display: "flex", gap: 8 }}>
+            <Btn variant={mode==="manual"?"primary":"ghost"} size="sm" onClick={() => setMode("manual")}>✏️ Paste Transcript</Btn>
+            <Btn variant={mode==="live"?"primary":"ghost"} size="sm" onClick={() => setMode("live")}>🎙 Live Recording</Btn>
+          </div>
+        </div>
 
-      {mode === "live" ? (
-        <Card>
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 16, padding: "8px 0 4px" }}>
-            <Waveform active={isRecording && !isPaused} level={audioLevel} />
-            {isRecording && (
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <div className="rec-pulse" style={{ width: 9, height: 9, background: "#ef4444", borderRadius: "50%" }} />
-                <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 20, color: "#ef4444", fontWeight: 600 }}>{fmtTime(recTime)}</span>
-                {isPaused && <Chip label="Paused" color="#f97316" />}
+        {mode === "live" ? (
+          <div>
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 16, padding: "20px 0 4px", background: "var(--surface-2)", borderRadius: 10 }}>
+              <Waveform active={isRecording && !isPaused} level={audioLevel} />
+              {isRecording && (
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <div className="rec-pulse" style={{ width: 9, height: 9, background: "var(--danger)", borderRadius: "50%" }} />
+                  <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 20, color: "var(--danger)", fontWeight: 600 }}>{fmtTime(recTime)}</span>
+                  {isPaused && <Chip label="Paused" color="var(--warning)" />}
+                </div>
+              )}
+              <div style={{ display: "flex", gap: 10, paddingBottom: 20 }}>
+                {!isRecording
+                  ? <Btn size="lg" onClick={startRecording}>⏺ Start Recording</Btn>
+                  : <>
+                      <Btn variant="ghost" onClick={togglePause}>{isPaused ? "▶ Resume" : "⏸ Pause"}</Btn>
+                      <Btn variant="danger" onClick={stopRecording}>⏹ Stop & Save</Btn>
+                    </>}
+              </div>
+            </div>
+            {transcript && (
+              <div style={{ marginTop: 14, background: "var(--surface-2)", borderRadius: 8, padding: 14, maxHeight: 220, overflowY: "auto" }}>
+                <Label>Live Transcript</Label>
+                <p style={{ fontSize: 12, color: "var(--text-2)", lineHeight: 1.85, whiteSpace: "pre-wrap" }}>{transcript}</p>
               </div>
             )}
-            <div style={{ display: "flex", gap: 10 }}>
-              {!isRecording
-                ? <Btn size="lg" onClick={startRecording}>⏺ Start Recording</Btn>
-                : <>
-                    <Btn variant="ghost" onClick={togglePause}>{isPaused ? "▶ Resume" : "⏸ Pause"}</Btn>
-                    <Btn variant="danger" onClick={stopRecording}>⏹ Stop & Save</Btn>
-                  </>}
+            {!transcript && !isRecording && (
+              <p style={{ fontSize: 12, color: "var(--text-5)", textAlign: "center", marginTop: 8 }}>Press Start to begin recording. Transcript will appear live.</p>
+            )}
+          </div>
+        ) : (
+          <div>
+            <textarea value={transcript} onChange={e => setTranscript(e.target.value)} rows={14}
+              placeholder={`Paste your classroom transcript here.\n\nBest results when you:\n  • Label speakers:  Teacher:  Student A:  Student B:\n  • Include timestamps if available  [0:00]\n  • Include student questions and responses\n  • Note transitions, activities, or pacing shifts\n\nExample:\nTeacher: Today we're diving into systems of equations. Before we start — who can tell me what we figured out last week about slope?\nStudent A: That slope is like the steepness of the line?\nTeacher: Exactly right. And how does that connect to what we're doing today?`}
+              style={{ width: "100%", background: "var(--surface-2)", border: "1px solid var(--border)", borderRadius: 9, padding: 14, color: "var(--text)", fontSize: 13, lineHeight: 1.85, outline: "none" }} />
+            <div style={{ fontSize: 11, color: "var(--text-5)", marginTop: 6, textAlign: "right" }}>
+              {transcript.split(" ").filter(Boolean).length} words
             </div>
           </div>
-          {transcript && (
-            <div style={{ marginTop: 14, background: "#0a0d12", borderRadius: 8, padding: 14, maxHeight: 220, overflowY: "auto" }}>
-              <Label>Live Transcript</Label>
-              <p style={{ fontSize: 12, color: "#94a3b8", lineHeight: 1.85, whiteSpace: "pre-wrap" }}>{transcript}</p>
-            </div>
-          )}
-          {!transcript && !isRecording && (
-            <p style={{ fontSize: 12, color: "#334155", textAlign: "center", marginTop: 8 }}>Press Start to begin recording. Transcript will appear live.</p>
-          )}
-        </Card>
-      ) : (
-        <Card>
-          <Label>Transcript</Label>
-          <textarea value={transcript} onChange={e => setTranscript(e.target.value)} rows={14}
-            placeholder={`Paste your classroom transcript here.\n\nBest results when you:\n  • Label speakers:  Teacher:  Student A:  Student B:\n  • Include timestamps if available  [0:00]\n  • Include student questions and responses\n  • Note transitions, activities, or pacing shifts\n\nExample:\nTeacher: Today we're diving into systems of equations. Before we start — who can tell me what we figured out last week about slope?\nStudent A: That slope is like the steepness of the line?\nTeacher: Exactly right. And how does that connect to what we're doing today?`}
-            style={{ width: "100%", background: "#0a0d12", border: "1px solid #21262d", borderRadius: 9, padding: 14, color: "#e6edf3", fontSize: 13, lineHeight: 1.85, outline: "none" }} />
-          <div style={{ fontSize: 11, color: "#334155", marginTop: 6, textAlign: "right" }}>
-            {transcript.split(" ").filter(Boolean).length} words
-          </div>
-        </Card>
-      )}
+        )}
+      </Card>
 
-      {err && <div style={{ background: "#7f1d1d22", border: "1px solid #ef444433", borderRadius: 8, padding: "10px 14px", fontSize: 12, color: "#fca5a5" }}>{err}</div>}
+      {err && <div style={{ background: "var(--danger-soft)", border: "1px solid #dc262622", borderRadius: 8, padding: "10px 14px", fontSize: 12, color: "var(--danger)" }}>{err}</div>}
 
       <Btn onClick={handleAnalyze} disabled={loading} full size="lg">
         {loading
@@ -860,26 +899,79 @@ function RecordView({ apiKey, onAnalyze }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // ANALYSIS VIEW
 // ─────────────────────────────────────────────────────────────────────────────
-function AnalysisView({ session, apiKey }) {
+// Renders a framework's domains/components against an { [componentKey]: {rating, evidence, feedback} }
+// object, with an optional expandable AI coaching tip per component. Shared by AnalysisView
+// (live observations) and LessonPlanView (written plans mapped to the same frameworks).
+function FrameworkEvidenceBlock({ fw, evidence, apiKey }) {
   const [tips, setTips] = useState({});
   const [loadingTip, setLoadingTip] = useState({});
   const [openTip, setOpenTip] = useState(null);
-  if (!session) return <EmptyState icon="⚡" text="Run an observation to see AI analysis here." />;
 
-  const { analysis, framework: fwKey, meta } = session;
-  const fw = FRAMEWORKS[fwKey];
-
-  const getTip = async (ck, cn, rating, evidence) => {
+  const getTip = async (ck, cn, rating, ev) => {
     if (openTip === ck) { setOpenTip(null); return; }
     setOpenTip(ck);
     if (tips[ck]) return;
     setLoadingTip(p => ({ ...p, [ck]: true }));
     try {
-      const tip = await generateCoachingTip(apiKey, ck, cn, rating, evidence, fw);
+      const tip = await generateCoachingTip(apiKey, ck, cn, rating, ev, fw);
       setTips(p => ({ ...p, [ck]: tip }));
     } catch {}
     setLoadingTip(p => ({ ...p, [ck]: false }));
   };
+
+  return (
+    <>
+      {Object.entries(fw.domains).map(([dk, d]) => {
+        const evidenceComps = Object.entries(d.components).filter(([ck]) => evidence?.[ck]);
+        if (!evidenceComps.length) return null;
+        return (
+          <div key={dk} style={{ marginBottom: 20 }}>
+            <div style={{ fontSize: 10, color: d.color, fontWeight: 800, letterSpacing: "0.08em", marginBottom: 10, paddingBottom: 6, borderBottom: `1px solid ${d.color}22` }}>
+              {dk} — {d.label}
+            </div>
+            {evidenceComps.map(([ck, cn]) => {
+              const ev = evidence[ck];
+              const rc = ratingColor(ev.rating);
+              return (
+                <div key={ck} style={{ marginBottom: 10, background: "var(--surface-2)", borderRadius: 9, padding: 12, borderLeft: `3px solid ${d.color}44` }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8, gap: 8, flexWrap: "wrap" }}>
+                    <div>
+                      <span style={{ fontSize: 10, color: d.color, fontWeight: 800 }}>{ck} </span>
+                      <span style={{ fontSize: 12, color: "var(--text-2)", fontWeight: 600 }}>{cn}</span>
+                    </div>
+                    {ev.rating && <Chip label={`${ev.rating} – ${fw.ratingScale[ev.rating]}`} color={rc} />}
+                  </div>
+                  {ev.evidence?.slice(0,2).map((e,i) => (
+                    <div key={i} style={{ fontSize: 11, color: "var(--text-3)", background: "var(--surface)", borderRadius: 5, padding: "5px 10px", marginBottom: 4, lineHeight: 1.6 }}>❝ {e}</div>
+                  ))}
+                  {ev.feedback && <p style={{ fontSize: 11, color: "var(--text-3)", lineHeight: 1.65, marginTop: 7 }}>{ev.feedback}</p>}
+                  <div style={{ marginTop: 8 }}>
+                    <Btn size="sm" variant="ghost" onClick={() => getTip(ck, cn, ev.rating, ev.evidence)}>
+                      {openTip === ck ? "▲ Hide Tip" : "✦ Coaching Tip"}
+                    </Btn>
+                    {openTip === ck && (
+                      <div style={{ marginTop: 8, background: d.color+"0d", border: `1px solid ${d.color}22`, borderRadius: 8, padding: 12 }}>
+                        {loadingTip[ck]
+                          ? <span style={{ display:"flex",alignItems:"center",gap:8,color:"var(--text-4)",fontSize:12 }}><Spinner size={14}/>Generating tip…</span>
+                          : <p style={{ fontSize: 12, color: "var(--text-2)", lineHeight: 1.75 }}>{tips[ck]}</p>}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        );
+      })}
+    </>
+  );
+}
+
+function AnalysisView({ session, apiKey }) {
+  if (!session) return <EmptyState icon="⚡" text="Run an observation to see AI analysis here." />;
+
+  const { analysis, framework: fwKey, meta } = session;
+  const fw = FRAMEWORKS[fwKey];
 
   const domainAvgs = Object.entries(fw.domains).map(([dk, d]) => {
     const rated = Object.keys(d.components).map(c => analysis.evidence?.[c]?.rating).filter(Boolean);
@@ -896,13 +988,13 @@ function AnalysisView({ session, apiKey }) {
           <div style={{ flex: 1 }}>
             <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
               <Chip label={fw.shortName} color={fw.color} size="md" />
-              {meta.subject && <Chip label={meta.subject} color="#475569" size="md" />}
-              {meta.grade && <Chip label={`Gr ${meta.grade}`} color="#475569" size="md" />}
+              {meta.subject && <Chip label={meta.subject} color="var(--text-4)" size="md" />}
+              {meta.grade && <Chip label={`Gr ${meta.grade}`} color="var(--text-4)" size="md" />}
               {analysis.overallRating && <Chip label={fw.ratingScale[Math.round(analysis.overallRating)]} color={ratingColor(Math.round(analysis.overallRating))} size="md" />}
             </div>
-            <div style={{ fontSize: 18, fontWeight: 800, color: "#e6edf3" }}>{meta.teacher || "Observation"}</div>
-            <div style={{ fontSize: 12, color: "#475569", marginTop: 2 }}>{meta.school}{meta.school && " · "}{meta.date} · Observer: {meta.observer || "—"}</div>
-            <p style={{ fontSize: 13, color: "#94a3b8", lineHeight: 1.75, marginTop: 12 }}>{analysis.summary}</p>
+            <div style={{ fontSize: 18, fontWeight: 800, color: "var(--text)" }}>{meta.teacher || "Observation"}</div>
+            <div style={{ fontSize: 12, color: "var(--text-4)", marginTop: 2 }}>{meta.school}{meta.school && " · "}{meta.date} · Observer: {meta.observer || "—"}</div>
+            <p style={{ fontSize: 13, color: "var(--text-2)", lineHeight: 1.75, marginTop: 12 }}>{analysis.summary}</p>
           </div>
         </div>
       </Card>
@@ -914,9 +1006,9 @@ function AnalysisView({ session, apiKey }) {
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
               <div>
                 <div style={{ fontSize: 10, color: d.color, fontWeight: 800, letterSpacing: "0.1em" }}>{dk}</div>
-                <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 2 }}>{d.label}</div>
+                <div style={{ fontSize: 12, color: "var(--text-2)", marginTop: 2 }}>{d.label}</div>
               </div>
-              <span style={{ fontSize: 22, fontWeight: 800, color: avg ? d.color : "#21262d", fontFamily: "'JetBrains Mono',monospace" }}>{avg?.toFixed(1) || "—"}</span>
+              <span style={{ fontSize: 22, fontWeight: 800, color: avg ? d.color : "var(--text-faint)", fontFamily: "'JetBrains Mono',monospace" }}>{avg?.toFixed(1) || "—"}</span>
             </div>
             <RatingBar value={avg || 0} max={Object.keys(fw.ratingScale).length} color={d.color} />
           </Card>
@@ -925,16 +1017,16 @@ function AnalysisView({ session, apiKey }) {
 
       {/* Strengths / Growth */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-        <Card accent="#22c55e">
-          <Label color="#22c55e">✓ Strengths</Label>
+        <Card accent="#16a34a">
+          <Label color="var(--success)">✓ Strengths</Label>
           {analysis.strengths?.map((s,i) => (
-            <div key={i} style={{ fontSize: 12, color: "#86efac", lineHeight: 1.7, marginBottom: 8, paddingLeft: 10, borderLeft: "2px solid #22c55e33" }}>{s}</div>
+            <div key={i} style={{ fontSize: 12, color: "var(--text-2)", lineHeight: 1.7, marginBottom: 8, paddingLeft: 10, borderLeft: "2px solid #16a34a33" }}>{s}</div>
           ))}
         </Card>
-        <Card accent="#f97316">
-          <Label color="#f97316">↑ Growth Areas</Label>
+        <Card accent="#d97706">
+          <Label color="var(--warning)">↑ Growth Areas</Label>
           {analysis.growthAreas?.map((s,i) => (
-            <div key={i} style={{ fontSize: 12, color: "#fdba74", lineHeight: 1.7, marginBottom: 8, paddingLeft: 10, borderLeft: "2px solid #f9731633" }}>{s}</div>
+            <div key={i} style={{ fontSize: 12, color: "var(--text-2)", lineHeight: 1.7, marginBottom: 8, paddingLeft: 10, borderLeft: "2px solid #d9770633" }}>{s}</div>
           ))}
         </Card>
       </div>
@@ -944,13 +1036,13 @@ function AnalysisView({ session, apiKey }) {
         <Card>
           <Label>Scripted Language</Label>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <div style={{ background: "#0a0d12", borderRadius: 8, padding: 12 }}>
-              <div style={{ fontSize: 10, color: "#22c55e", fontWeight: 700, marginBottom: 6 }}>WHAT WORKED</div>
-              <p style={{ fontSize: 12, color: "#86efac", fontStyle: "italic", lineHeight: 1.8 }}>"{analysis.scriptedExamples.whatWorked}"</p>
+            <div style={{ background: "var(--success-soft)", borderRadius: 8, padding: 12 }}>
+              <div style={{ fontSize: 10, color: "var(--success)", fontWeight: 700, marginBottom: 6 }}>WHAT WORKED</div>
+              <p style={{ fontSize: 12, color: "#15803d", fontStyle: "italic", lineHeight: 1.8 }}>"{analysis.scriptedExamples.whatWorked}"</p>
             </div>
-            <div style={{ background: "#0a0d12", borderRadius: 8, padding: 12 }}>
-              <div style={{ fontSize: 10, color: "#3b82f6", fontWeight: 700, marginBottom: 6 }}>TRY NEXT TIME</div>
-              <p style={{ fontSize: 12, color: "#93c5fd", fontStyle: "italic", lineHeight: 1.8 }}>"{analysis.scriptedExamples.whatToTry}"</p>
+            <div style={{ background: "var(--accent-soft)", borderRadius: 8, padding: 12 }}>
+              <div style={{ fontSize: 10, color: "var(--accent)", fontWeight: 700, marginBottom: 6 }}>TRY NEXT TIME</div>
+              <p style={{ fontSize: 12, color: "#4338ca", fontStyle: "italic", lineHeight: 1.8 }}>"{analysis.scriptedExamples.whatToTry}"</p>
             </div>
           </div>
         </Card>
@@ -959,48 +1051,7 @@ function AnalysisView({ session, apiKey }) {
       {/* Evidence by component */}
       <Card>
         <Label>Evidence by Component</Label>
-        {Object.entries(fw.domains).map(([dk, d]) => {
-          const evidenceComps = Object.entries(d.components).filter(([ck]) => analysis.evidence?.[ck]);
-          if (!evidenceComps.length) return null;
-          return (
-            <div key={dk} style={{ marginBottom: 20 }}>
-              <div style={{ fontSize: 10, color: d.color, fontWeight: 800, letterSpacing: "0.08em", marginBottom: 10, paddingBottom: 6, borderBottom: `1px solid ${d.color}22` }}>
-                {dk} — {d.label}
-              </div>
-              {evidenceComps.map(([ck, cn]) => {
-                const ev = analysis.evidence[ck];
-                const rc = ratingColor(ev.rating);
-                return (
-                  <div key={ck} style={{ marginBottom: 10, background: "#0a0d12", borderRadius: 9, padding: 12, borderLeft: `3px solid ${d.color}44` }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8, gap: 8, flexWrap: "wrap" }}>
-                      <div>
-                        <span style={{ fontSize: 10, color: d.color, fontWeight: 800 }}>{ck} </span>
-                        <span style={{ fontSize: 12, color: "#94a3b8", fontWeight: 600 }}>{cn}</span>
-                      </div>
-                      {ev.rating && <Chip label={`${ev.rating} – ${fw.ratingScale[ev.rating]}`} color={rc} />}
-                    </div>
-                    {ev.evidence?.slice(0,2).map((e,i) => (
-                      <div key={i} style={{ fontSize: 11, color: "#64748b", background: "#161b22", borderRadius: 5, padding: "5px 10px", marginBottom: 4, lineHeight: 1.6 }}>❝ {e}</div>
-                    ))}
-                    {ev.feedback && <p style={{ fontSize: 11, color: "#64748b", lineHeight: 1.65, marginTop: 7 }}>{ev.feedback}</p>}
-                    <div style={{ marginTop: 8 }}>
-                      <Btn size="sm" variant="ghost" onClick={() => getTip(ck, cn, ev.rating, ev.evidence)}>
-                        {openTip === ck ? "▲ Hide Tip" : "✦ Coaching Tip"}
-                      </Btn>
-                      {openTip === ck && (
-                        <div style={{ marginTop: 8, background: d.color+"0d", border: `1px solid ${d.color}22`, borderRadius: 8, padding: 12 }}>
-                          {loadingTip[ck]
-                            ? <span style={{ display:"flex",alignItems:"center",gap:8,color:"#475569",fontSize:12 }}><Spinner size={14}/>Generating tip…</span>
-                            : <p style={{ fontSize: 12, color: "#cbd5e1", lineHeight: 1.75 }}>{tips[ck]}</p>}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          );
-        })}
+        <FrameworkEvidenceBlock fw={fw} evidence={analysis.evidence} apiKey={apiKey} />
       </Card>
 
       {/* Student interventions */}
@@ -1008,16 +1059,16 @@ function AnalysisView({ session, apiKey }) {
         <Card>
           <Label>Student Intervention Recommendations</Label>
           {analysis.studentInterventions.map((item, i) => {
-            const uc = { high:"#ef4444", medium:"#f97316", low:"#22c55e" }[item.urgency] || "#64748b";
+            const uc = { high:"#dc2626", medium:"#d97706", low:"#16a34a" }[item.urgency] || "var(--text-4)";
             return (
-              <div key={i} style={{ background: "#0a0d12", borderRadius: 9, padding: 13, marginBottom: 10, borderLeft: `3px solid ${uc}` }}>
+              <div key={i} style={{ background: "var(--surface-2)", borderRadius: 9, padding: 13, marginBottom: 10, borderLeft: `3px solid ${uc}` }}>
                 <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 7, flexWrap: "wrap", gap: 6 }}>
-                  <span style={{ fontWeight: 700, fontSize: 13, color: "#e6edf3" }}>{item.studentRef}</span>
+                  <span style={{ fontWeight: 700, fontSize: 13, color: "var(--text)" }}>{item.studentRef}</span>
                   <Chip label={`${item.urgency} priority`} color={uc} />
                 </div>
-                <p style={{ fontSize: 12, color: "#64748b", marginBottom: 4, lineHeight: 1.6 }}><strong style={{ color:"#475569" }}>Observed:</strong> {item.observation}</p>
-                <p style={{ fontSize: 12, color: "#64748b", marginBottom: 4, lineHeight: 1.6 }}><strong style={{ color:"#22c55e" }}>Intervention:</strong> {item.intervention}</p>
-                {item.strategy && <p style={{ fontSize: 12, color: "#64748b", lineHeight: 1.6 }}><strong style={{ color:"#3b82f6" }}>Strategy:</strong> {item.strategy}</p>}
+                <p style={{ fontSize: 12, color: "var(--text-3)", marginBottom: 4, lineHeight: 1.6 }}><strong style={{ color:"var(--text-4)" }}>Observed:</strong> {item.observation}</p>
+                <p style={{ fontSize: 12, color: "var(--text-3)", marginBottom: 4, lineHeight: 1.6 }}><strong style={{ color:"var(--success)" }}>Intervention:</strong> {item.intervention}</p>
+                {item.strategy && <p style={{ fontSize: 12, color: "var(--text-3)", lineHeight: 1.6 }}><strong style={{ color:"var(--accent)" }}>Strategy:</strong> {item.strategy}</p>}
               </div>
             );
           })}
@@ -1056,24 +1107,24 @@ function GrowthPlanView({ session }) {
 
   return (
     <div className="fade-up" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <Card style={{ borderTop: "3px solid #22c55e" }}>
-        <div style={{ fontSize: 17, fontWeight: 800, color: "#e6edf3" }}>Growth Plan — {meta.teacher || "Teacher"}</div>
-        <div style={{ fontSize: 12, color: "#475569", marginTop: 3 }}>{meta.date} · {meta.school}</div>
-        <p style={{ fontSize: 13, color: "#94a3b8", lineHeight: 1.75, marginTop: 12 }}>{analysis.summary}</p>
+      <Card style={{ borderTop: "3px solid #16a34a" }}>
+        <div style={{ fontSize: 17, fontWeight: 800, color: "var(--text)" }}>Growth Plan — {meta.teacher || "Teacher"}</div>
+        <div style={{ fontSize: 12, color: "var(--text-4)", marginTop: 3 }}>{meta.date} · {meta.school}</div>
+        <p style={{ fontSize: 13, color: "var(--text-2)", lineHeight: 1.75, marginTop: 12 }}>{analysis.summary}</p>
       </Card>
 
       {[
-        { key: "immediate", label: "🎯 Tomorrow — Take Action Now", color: "#ef4444", desc: "Implement in your very next class" },
-        { key: "shortTerm",  label: "📅 2-Week Practice Goals", color: "#f97316", desc: "Consistent focus over the next two weeks" },
-        { key: "longTerm",   label: "🚀 Long-Term Development", color: "#3b82f6", desc: "Professional growth trajectory" },
+        { key: "immediate", label: "🎯 Tomorrow — Take Action Now", color: "#dc2626", desc: "Implement in your very next class" },
+        { key: "shortTerm",  label: "📅 2-Week Practice Goals", color: "#d97706", desc: "Consistent focus over the next two weeks" },
+        { key: "longTerm",   label: "🚀 Long-Term Development", color: "#4f46e5", desc: "Professional growth trajectory" },
       ].map(s => (
         <Card key={s.key} accent={s.color}>
           <div style={{ fontSize: 14, fontWeight: 800, color: s.color, marginBottom: 2 }}>{s.label}</div>
-          <div style={{ fontSize: 10, color: "#334155", marginBottom: 14, textTransform: "uppercase", letterSpacing: "0.08em" }}>{s.desc}</div>
+          <div style={{ fontSize: 10, color: "var(--text-5)", marginBottom: 14, textTransform: "uppercase", letterSpacing: "0.08em" }}>{s.desc}</div>
           {(analysis.growthPlan[s.key] || []).map((item, i) => (
-            <div key={i} style={{ display: "flex", gap: 10, background: "#0a0d12", borderRadius: 7, padding: "10px 12px", marginBottom: 8 }}>
+            <div key={i} style={{ display: "flex", gap: 10, background: "var(--surface-2)", borderRadius: 7, padding: "10px 12px", marginBottom: 8 }}>
               <span style={{ color: s.color, flexShrink: 0, fontWeight: 800 }}>▸</span>
-              <span style={{ fontSize: 13, color: "#94a3b8", lineHeight: 1.65 }}>{item}</span>
+              <span style={{ fontSize: 13, color: "var(--text-2)", lineHeight: 1.65 }}>{item}</span>
             </div>
           ))}
         </Card>
@@ -1082,9 +1133,9 @@ function GrowthPlanView({ session }) {
       {analysis.scriptedExamples && (
         <Card>
           <Label>Scripted Language to Practice</Label>
-          <div style={{ background: "#0a0d12", borderRadius: 8, padding: 14 }}>
-            <p style={{ fontSize: 11, color: "#475569", marginBottom: 6 }}>Replace current phrasing with:</p>
-            <p style={{ fontSize: 13, color: "#93c5fd", fontStyle: "italic", lineHeight: 1.8 }}>"{analysis.scriptedExamples.whatToTry}"</p>
+          <div style={{ background: "var(--accent-soft)", borderRadius: 8, padding: 14 }}>
+            <p style={{ fontSize: 11, color: "var(--text-4)", marginBottom: 6 }}>Replace current phrasing with:</p>
+            <p style={{ fontSize: 13, color: "#4338ca", fontStyle: "italic", lineHeight: 1.8 }}>"{analysis.scriptedExamples.whatToTry}"</p>
           </div>
         </Card>
       )}
@@ -1129,8 +1180,8 @@ function CoachingView({ session, apiKey }) {
       <Card>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
           <div>
-            <div style={{ fontSize: 16, fontWeight: 800, color: "#e6edf3" }}>Coaching Conference</div>
-            <div style={{ fontSize: 12, color: "#475569" }}>{session.meta.teacher} · {FRAMEWORKS[session.framework]?.shortName}</div>
+            <div style={{ fontSize: 16, fontWeight: 800, color: "var(--text)" }}>Coaching Conference</div>
+            <div style={{ fontSize: 12, color: "var(--text-4)" }}>{session.meta.teacher} · {FRAMEWORKS[session.framework]?.shortName}</div>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
             <Btn variant={confType==="pre"?"primary":"ghost"} size="sm" onClick={() => setConfType("pre")}>Pre-Observation</Btn>
@@ -1145,9 +1196,9 @@ function CoachingView({ session, apiKey }) {
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {questions.map((q, i) => (
               <div key={i} onClick={() => send(q)}
-                style={{ background: "#161b22", border: "1px solid #21262d", borderRadius: 8, padding: "10px 14px", cursor: "pointer", fontSize: 12, color: "#94a3b8", lineHeight: 1.6, transition: "all .15s" }}
-                onMouseEnter={e => { e.currentTarget.style.borderColor="#3b82f6"; e.currentTarget.style.color="#e6edf3"; }}
-                onMouseLeave={e => { e.currentTarget.style.borderColor="#21262d"; e.currentTarget.style.color="#94a3b8"; }}>
+                style={{ background: "var(--surface-2)", border: "1px solid var(--border)", borderRadius: 8, padding: "10px 14px", cursor: "pointer", fontSize: 12, color: "var(--text-2)", lineHeight: 1.6, transition: "all .15s" }}
+                onMouseEnter={e => { e.currentTarget.style.borderColor="var(--accent)"; e.currentTarget.style.color="var(--text)"; }}
+                onMouseLeave={e => { e.currentTarget.style.borderColor="var(--border)"; e.currentTarget.style.color="var(--text-2)"; }}>
                 💬 {q}
               </div>
             ))}
@@ -1158,21 +1209,21 @@ function CoachingView({ session, apiKey }) {
       <Card style={{ display: "flex", flexDirection: "column" }}>
         <Label>Conference Conversation</Label>
         <div ref={chatRef} style={{ minHeight: 200, maxHeight: 360, overflowY: "auto", display: "flex", flexDirection: "column", gap: 10, marginBottom: 14 }}>
-          {messages.length === 0 && <p style={{ fontSize: 12, color: "#334155", fontStyle: "italic" }}>Click a question above or type to begin the conference…</p>}
+          {messages.length === 0 && <p style={{ fontSize: 12, color: "var(--text-5)", fontStyle: "italic" }}>Click a question above or type to begin the conference…</p>}
           {messages.map((m, i) => (
             <div key={i} style={{ display: "flex", justifyContent: m.role==="user"?"flex-end":"flex-start" }}>
-              <div style={{ maxWidth: "80%", background: m.role==="user"?"#1d4ed815":"#161b22", border: `1px solid ${m.role==="user"?"#3b82f622":"#21262d"}`, borderRadius: 10, padding: "10px 14px" }}>
-                <div style={{ fontSize: 9, color: "#334155", fontWeight: 700, letterSpacing: "0.1em", marginBottom: 4 }}>{m.role==="user"?"TEACHER":"COACH"}</div>
-                <p style={{ fontSize: 13, color: "#94a3b8", lineHeight: 1.75 }}>{m.content}</p>
+              <div style={{ maxWidth: "80%", background: m.role==="user"?"var(--accent-soft)":"var(--surface-2)", border: `1px solid ${m.role==="user"?"#4f46e522":"var(--border)"}`, borderRadius: 10, padding: "10px 14px" }}>
+                <div style={{ fontSize: 9, color: "var(--text-5)", fontWeight: 700, letterSpacing: "0.1em", marginBottom: 4 }}>{m.role==="user"?"TEACHER":"COACH"}</div>
+                <p style={{ fontSize: 13, color: "var(--text-2)", lineHeight: 1.75 }}>{m.content}</p>
               </div>
             </div>
           ))}
-          {loading && <div style={{ display:"flex",gap:8,alignItems:"center" }}><Spinner size={14}/><span style={{ fontSize:12,color:"#475569" }}>Coach is responding…</span></div>}
+          {loading && <div style={{ display:"flex",gap:8,alignItems:"center" }}><Spinner size={14}/><span style={{ fontSize:12,color:"var(--text-4)" }}>Coach is responding…</span></div>}
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           <input value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => e.key==="Enter" && send(input)}
             placeholder="Type a teacher response or question…"
-            style={{ flex:1, background:"#161b22", border:"1px solid #30363d", borderRadius:8, padding:"10px 14px", color:"#e6edf3", fontSize:13, outline:"none", fontFamily:"inherit" }} />
+            style={{ flex:1, background:"var(--surface)", border:"1px solid var(--border-strong)", borderRadius:8, padding:"10px 14px", color:"var(--text)", fontSize:13, outline:"none", fontFamily:"inherit" }} />
           <Btn onClick={() => send(input)} disabled={loading||!input.trim()}>Send</Btn>
         </div>
       </Card>
@@ -1228,9 +1279,9 @@ function ReportView({ session, apiKey }) {
             ["growth","🌱 PD Action Plan Memo","Professional development documentation for coaching file"],
           ].map(([k, label, desc]) => (
             <div key={k} onClick={() => setReportType(k)}
-              style={{ background: reportType===k?"#1d4ed811":"#161b22", border: `2px solid ${reportType===k?"#3b82f6":"#21262d"}`, borderRadius: 9, padding: 12, cursor: "pointer" }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: reportType===k?"#93c5fd":"#94a3b8" }}>{label}</div>
-              <div style={{ fontSize: 11, color: "#334155", marginTop: 3 }}>{desc}</div>
+              style={{ background: reportType===k?"var(--accent-soft)":"var(--surface)", border: `1.5px solid ${reportType===k?"var(--accent)":"var(--border-strong)"}`, borderRadius: 9, padding: 12, cursor: "pointer" }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: reportType===k?"var(--accent)":"var(--text-2)" }}>{label}</div>
+              <div style={{ fontSize: 11, color: "var(--text-5)", marginTop: 3 }}>{desc}</div>
             </div>
           ))}
         </div>
@@ -1240,25 +1291,25 @@ function ReportView({ session, apiKey }) {
       </Card>
 
       {reportText && (
-        <Card style={{ borderTop: "3px solid #3b82f6" }}>
+        <Card style={{ borderTop: "3px solid var(--accent)" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: 8 }}>
             <Label>Generated Report</Label>
             <Btn size="sm" variant="outline" onClick={copy}>📋 Copy Full Report</Btn>
           </div>
-          <div style={{ background: "#0a0d12", borderRadius: 8, padding: 16, marginBottom: 14 }}>
-            <div style={{ fontSize: 14, fontWeight: 800, color: "#e6edf3", marginBottom: 10 }}>Classroom Observation Report</div>
+          <div style={{ background: "var(--surface-2)", borderRadius: 8, padding: 16, marginBottom: 14 }}>
+            <div style={{ fontSize: 14, fontWeight: 800, color: "var(--text)", marginBottom: 10 }}>Classroom Observation Report</div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 5 }}>
               {[["Teacher",meta.teacher],["Observer",meta.observer],["Date",meta.date],["School",meta.school],["Grade / Subject",`${meta.grade} · ${meta.subject}`],["Framework",fw.name]].map(([l,v]) => (
-                <div key={l} style={{ fontSize: 11, color: "#475569" }}><strong style={{ color:"#64748b" }}>{l}:</strong> {v || "—"}</div>
+                <div key={l} style={{ fontSize: 11, color: "var(--text-4)" }}><strong style={{ color:"var(--text-3)" }}>{l}:</strong> {v || "—"}</div>
               ))}
             </div>
           </div>
-          <p style={{ fontSize: 13, color: "#94a3b8", lineHeight: 1.9, whiteSpace: "pre-wrap" }}>{reportText}</p>
-          <div style={{ marginTop: 20, paddingTop: 14, borderTop: "1px solid #21262d", display: "flex", justifyContent: "space-between" }}>
-            <div style={{ fontSize: 10, color: "#334155" }}>Observer Signature: ________________________  Date: ________</div>
-            <div style={{ fontSize: 10, color: "#334155" }}>Teacher Signature: ________________________   Date: ________</div>
+          <p style={{ fontSize: 13, color: "var(--text-2)", lineHeight: 1.9, whiteSpace: "pre-wrap" }}>{reportText}</p>
+          <div style={{ marginTop: 20, paddingTop: 14, borderTop: "1px solid var(--border)", display: "flex", justifyContent: "space-between" }}>
+            <div style={{ fontSize: 10, color: "var(--text-5)" }}>Observer Signature: ________________________  Date: ________</div>
+            <div style={{ fontSize: 10, color: "var(--text-5)" }}>Teacher Signature: ________________________   Date: ________</div>
           </div>
-          <div style={{ marginTop: 10, fontSize: 9, color: "#1e293b", textAlign: "center" }}>Generated by ClassroomLens Pro · anthonykc@gmail.com</div>
+          <div style={{ marginTop: 10, fontSize: 9, color: "var(--text-faint)", textAlign: "center" }}>Generated by ClassroomLens Pro · anthonykc@gmail.com</div>
         </Card>
       )}
     </div>
@@ -1266,68 +1317,1011 @@ function ReportView({ session, apiKey }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ADMIN DASHBOARD
+// IEP MEETING ANALYSIS (stateless — nothing is saved)
 // ─────────────────────────────────────────────────────────────────────────────
-function AdminDashboard({ sessions }) {
+const MEETING_TYPES = ["Initial Evaluation", "Annual Review", "Triennial Reevaluation", "Amendment", "Manifestation Determination"];
+const IEP_STATUS_COLOR = { "on-track": "var(--success)", "needs-revision": "var(--warning)", "new": "var(--accent)", "unclear": "var(--text-4)" };
+const IEP_FLAG_COLOR = { ok: "var(--success)", watch: "var(--warning)", missing: "var(--danger)" };
+
+function IEPView({ apiKey }) {
+  const [meta, setMeta] = useState({ student: "", grade: "", date: new Date().toISOString().split("T")[0], meetingType: MEETING_TYPES[1], caseManager: "" });
+  const [mode, setMode] = useState("manual");
+  const [notes, setNotes] = useState("");
+  const [isRecording, setIsRecording] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
+  const [recTime, setRecTime] = useState(0);
+  const [audioLevel, setAudioLevel] = useState(0.5);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState("");
+  const [result, setResult] = useState(null);
+  const recognitionRef = useRef(null);
+  const timerRef = useRef(null);
+  const animRef = useRef(null);
+  const streamRef = useRef(null);
+
+  const setMf = (k, v) => setMeta(p => ({ ...p, [k]: v }));
+
+  useEffect(() => {
+    if (isRecording && !isPaused) timerRef.current = setInterval(() => setRecTime(t => t + 1), 1000);
+    else clearInterval(timerRef.current);
+    return () => clearInterval(timerRef.current);
+  }, [isRecording, isPaused]);
+
+  useEffect(() => () => {
+    clearInterval(timerRef.current);
+    cancelAnimationFrame(animRef.current);
+    streamRef.current?.getTracks().forEach(t => t.stop());
+    recognitionRef.current?.stop();
+  }, []);
+
+  const startRecording = async () => {
+    setNotes(""); setRecTime(0); setErr("");
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      const ctx = new AudioContext();
+      const src = ctx.createMediaStreamSource(stream);
+      const analyzerNode = ctx.createAnalyser();
+      analyzerNode.fftSize = 256;
+      src.connect(analyzerNode);
+      const tick = () => {
+        const buf = new Uint8Array(analyzerNode.frequencyBinCount);
+        analyzerNode.getByteFrequencyData(buf);
+        const avg = buf.reduce((a, b) => a + b, 0) / buf.length;
+        setAudioLevel(avg / 128);
+        animRef.current = requestAnimationFrame(tick);
+      };
+      tick();
+    } catch {}
+
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (SR) {
+      const r = new SR();
+      r.continuous = true; r.interimResults = true; r.lang = "en-US";
+      let final = "";
+      r.onresult = e => {
+        let interim = "";
+        for (let i = e.resultIndex; i < e.results.length; i++) {
+          if (e.results[i].isFinal) final += e.results[i][0].transcript + " ";
+          else interim = e.results[i][0].transcript;
+        }
+        setNotes(final + interim);
+      };
+      r.onerror = e => { if (e.error !== "aborted") setErr("Mic error: " + e.error); };
+      r.start();
+      recognitionRef.current = r;
+    } else {
+      setErr("Live transcription requires Chrome or Edge. Use Paste mode.");
+    }
+    setIsRecording(true); setIsPaused(false);
+  };
+
+  const stopRecording = () => {
+    setIsRecording(false); setIsPaused(false);
+    cancelAnimationFrame(animRef.current);
+    recognitionRef.current?.stop();
+    streamRef.current?.getTracks().forEach(t => t.stop());
+    setAudioLevel(0);
+  };
+
+  const togglePause = () => {
+    if (isPaused) recognitionRef.current?.start();
+    else recognitionRef.current?.stop();
+    setIsPaused(p => !p);
+  };
+
+  const analyze = async () => {
+    const text = notes.trim();
+    if (!text) { setErr("Please record or paste meeting notes first."); return; }
+    if (text.split(" ").length < 15) { setErr("Notes are too short for a meaningful analysis."); return; }
+    setErr(""); setLoading(true); setResult(null);
+    try {
+      setResult(await analyzeIEPMeeting(apiKey, text, meta));
+    } catch (e) {
+      setErr("Analysis failed: " + e.message + ". Check your API key in Settings.");
+    }
+    setLoading(false);
+  };
+
+  const copy = () => {
+    if (!result) return;
+    const lines = [
+      `IEP MEETING ANALYSIS`,
+      `Student: ${meta.student || "—"} | Grade: ${meta.grade || "—"} | Date: ${meta.date}`,
+      `Meeting Type: ${meta.meetingType} | Case Manager: ${meta.caseManager || "—"}`, "",
+      `SUMMARY`, result.summary, "",
+      `STUDENT STRENGTHS`, ...(result.studentStrengths||[]).map(s=>"• "+s), "",
+      `STUDENT NEEDS`, ...(result.studentNeeds||[]).map(s=>"• "+s), "",
+      `GOAL ALIGNMENT`, ...(result.goalAlignment||[]).map(g=>`• ${g.goal} [${g.status}] — ${g.note}`), "",
+      `ACCOMMODATION RECOMMENDATIONS`, ...(result.accommodationRecommendations||[]).map(a=>`• ${a.accommodation} — ${a.rationale}`), "",
+      `PARENT COMMUNICATION`, ...(result.parentCommunication||[]).map(s=>"• "+s), "",
+      `COMPLIANCE NOTES (IDEA/FAPE)`, ...(result.complianceNotes||[]).map(c=>`• [${c.flag}] ${c.area} — ${c.note}`), "",
+      `Generated by ClassroomLens Pro — not a substitute for legal or clinical review.`,
+    ];
+    navigator.clipboard?.writeText(lines.join("\n"));
+    alert("Analysis copied to clipboard!");
+  };
+
+  return (
+    <div className="fade-up" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div style={{ background: "var(--accent-soft)", border: "1px solid #4f46e522", borderRadius: 8, padding: "10px 14px", fontSize: 12, color: "var(--text-3)", display: "flex", gap: 8, alignItems: "center" }}>
+        <Icon name="iep" size={15} />
+        Nothing here is saved automatically — this analysis exists only in your browser. Copy anything you want to keep before navigating away.
+      </div>
+
+      <Card>
+        <Label>Meeting Details</Label>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+          <TextInput label="Student Name / Initials" value={meta.student} onChange={v => setMf("student", v)} />
+          <TextInput label="Case Manager" value={meta.caseManager} onChange={v => setMf("caseManager", v)} />
+          <TextInput label="Grade Level" value={meta.grade} onChange={v => setMf("grade", v)} />
+          <TextInput label="Date" type="date" value={meta.date} onChange={v => setMf("date", v)} />
+          <div style={{ gridColumn: "span 2" }}>
+            <div style={{ fontSize: 11, color: "var(--text-4)", marginBottom: 5, fontWeight: 600 }}>MEETING TYPE</div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {MEETING_TYPES.map(t => (
+                <button key={t} onClick={() => setMf("meetingType", t)}
+                  style={{ background: meta.meetingType===t ? "var(--accent-soft)" : "var(--surface)", border: `1px solid ${meta.meetingType===t ? "var(--accent)" : "var(--border-strong)"}`,
+                    color: meta.meetingType===t ? "var(--accent)" : "var(--text-3)", borderRadius: 6, padding: "6px 11px", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>
+                  {t}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      </Card>
+
+      <Card>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10, marginBottom: 14 }}>
+          <Label>Meeting Notes</Label>
+          <div style={{ display: "flex", gap: 8 }}>
+            <Btn variant={mode==="manual"?"primary":"ghost"} size="sm" onClick={() => setMode("manual")}>✏️ Paste Notes</Btn>
+            <Btn variant={mode==="live"?"primary":"ghost"} size="sm" onClick={() => setMode("live")}>🎙 Live Recording</Btn>
+          </div>
+        </div>
+
+        {mode === "live" ? (
+          <div>
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 16, padding: "20px 0 4px", background: "var(--surface-2)", borderRadius: 10 }}>
+              <Waveform active={isRecording && !isPaused} level={audioLevel} />
+              {isRecording && (
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <div className="rec-pulse" style={{ width: 9, height: 9, background: "var(--danger)", borderRadius: "50%" }} />
+                  <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 20, color: "var(--danger)", fontWeight: 600 }}>{fmtTime(recTime)}</span>
+                  {isPaused && <Chip label="Paused" color="var(--warning)" />}
+                </div>
+              )}
+              <div style={{ display: "flex", gap: 10, paddingBottom: 20 }}>
+                {!isRecording
+                  ? <Btn size="lg" onClick={startRecording}>⏺ Start Recording</Btn>
+                  : <>
+                      <Btn variant="ghost" onClick={togglePause}>{isPaused ? "▶ Resume" : "⏸ Pause"}</Btn>
+                      <Btn variant="danger" onClick={stopRecording}>⏹ Stop</Btn>
+                    </>}
+              </div>
+            </div>
+            {notes && (
+              <div style={{ marginTop: 14, background: "var(--surface-2)", borderRadius: 8, padding: 14, maxHeight: 220, overflowY: "auto" }}>
+                <Label>Live Notes</Label>
+                <p style={{ fontSize: 12, color: "var(--text-2)", lineHeight: 1.85, whiteSpace: "pre-wrap" }}>{notes}</p>
+              </div>
+            )}
+          </div>
+        ) : (
+          <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={12}
+            placeholder={`Paste your IEP meeting notes here.\n\nInclude what you can:\n  • Present levels of performance discussed\n  • Goals reviewed and proposed changes\n  • Accommodations/modifications discussed\n  • Parent/guardian input and questions\n  • Any decisions or next steps`}
+            style={{ width: "100%", background: "var(--surface-2)", border: "1px solid var(--border)", borderRadius: 9, padding: 14, color: "var(--text)", fontSize: 13, lineHeight: 1.85, outline: "none" }} />
+        )}
+      </Card>
+
+      {err && <div style={{ background: "var(--danger-soft)", border: "1px solid #dc262622", borderRadius: 8, padding: "10px 14px", fontSize: 12, color: "var(--danger)" }}>{err}</div>}
+
+      <Btn onClick={analyze} disabled={loading} full size="lg">
+        {loading ? <span style={{ display:"flex",alignItems:"center",gap:12,justifyContent:"center" }}><Spinner />Analyzing meeting notes…</span> : "⚡ Analyze IEP Meeting"}
+      </Btn>
+
+      {result && (
+        <div className="fade-up" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <Card style={{ borderTop: "3px solid var(--accent)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
+              <div>
+                <div style={{ fontSize: 17, fontWeight: 800, color: "var(--text)" }}>{meta.student || "Student"} — {meta.meetingType}</div>
+                <div style={{ fontSize: 12, color: "var(--text-4)", marginTop: 3 }}>{meta.date}{meta.caseManager && ` · Case Manager: ${meta.caseManager}`}</div>
+                <p style={{ fontSize: 13, color: "var(--text-2)", lineHeight: 1.75, marginTop: 12 }}>{result.summary}</p>
+              </div>
+              <Btn size="sm" variant="outline" onClick={copy}>📋 Copy Analysis</Btn>
+            </div>
+          </Card>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <Card accent="#16a34a">
+              <Label color="var(--success)">Student Strengths</Label>
+              {(result.studentStrengths||[]).map((s,i) => <div key={i} style={{ fontSize: 12, color: "var(--text-2)", lineHeight: 1.7, marginBottom: 8, paddingLeft: 10, borderLeft: "2px solid #16a34a33" }}>{s}</div>)}
+              {!result.studentStrengths?.length && <p style={{ fontSize: 12, color: "var(--text-5)" }}>None noted.</p>}
+            </Card>
+            <Card accent="#d97706">
+              <Label color="var(--warning)">Student Needs</Label>
+              {(result.studentNeeds||[]).map((s,i) => <div key={i} style={{ fontSize: 12, color: "var(--text-2)", lineHeight: 1.7, marginBottom: 8, paddingLeft: 10, borderLeft: "2px solid #d9770633" }}>{s}</div>)}
+              {!result.studentNeeds?.length && <p style={{ fontSize: 12, color: "var(--text-5)" }}>None noted.</p>}
+            </Card>
+          </div>
+
+          {result.goalAlignment?.length > 0 && (
+            <Card>
+              <Label>Goal Alignment</Label>
+              {result.goalAlignment.map((g,i) => (
+                <div key={i} style={{ background: "var(--surface-2)", borderRadius: 8, padding: 12, marginBottom: 8 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", marginBottom: 5 }}>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text)" }}>{g.goal}</span>
+                    <Chip label={g.status} color={IEP_STATUS_COLOR[g.status] || "var(--text-4)"} />
+                  </div>
+                  <p style={{ fontSize: 12, color: "var(--text-3)", lineHeight: 1.6 }}>{g.note}</p>
+                </div>
+              ))}
+            </Card>
+          )}
+
+          {result.accommodationRecommendations?.length > 0 && (
+            <Card>
+              <Label>Accommodation Recommendations</Label>
+              {result.accommodationRecommendations.map((a,i) => (
+                <div key={i} style={{ background: "var(--surface-2)", borderRadius: 8, padding: 12, marginBottom: 8 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text)", marginBottom: 4 }}>{a.accommodation}</div>
+                  <p style={{ fontSize: 12, color: "var(--text-3)", lineHeight: 1.6 }}>{a.rationale}</p>
+                </div>
+              ))}
+            </Card>
+          )}
+
+          {result.parentCommunication?.length > 0 && (
+            <Card>
+              <Label>Parent Communication Suggestions</Label>
+              {result.parentCommunication.map((s,i) => (
+                <div key={i} style={{ display: "flex", gap: 10, marginBottom: 8 }}>
+                  <span style={{ color: "var(--accent)", flexShrink: 0, fontWeight: 800 }}>▸</span>
+                  <span style={{ fontSize: 13, color: "var(--text-2)", lineHeight: 1.65 }}>{s}</span>
+                </div>
+              ))}
+            </Card>
+          )}
+
+          {result.complianceNotes?.length > 0 && (
+            <Card accent="#dc2626">
+              <Label color="var(--danger)">Compliance Notes (IDEA / FAPE)</Label>
+              {result.complianceNotes.map((c,i) => (
+                <div key={i} style={{ background: "var(--surface-2)", borderRadius: 8, padding: 12, marginBottom: 8, borderLeft: `3px solid ${IEP_FLAG_COLOR[c.flag] || "var(--text-4)"}` }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", marginBottom: 5 }}>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text)" }}>{c.area}</span>
+                    <Chip label={c.flag} color={IEP_FLAG_COLOR[c.flag] || "var(--text-4)"} />
+                  </div>
+                  <p style={{ fontSize: 12, color: "var(--text-3)", lineHeight: 1.6 }}>{c.note}</p>
+                </div>
+              ))}
+              <p style={{ fontSize: 10, color: "var(--text-5)", marginTop: 4 }}>This is AI-assisted support for your own review — not a substitute for legal or clinical judgment.</p>
+            </Card>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PLC MEETING ANALYZER (stateless — nothing is saved)
+// ─────────────────────────────────────────────────────────────────────────────
+const PLC_STATUS_COLOR = { aligned: "var(--success)", partial: "var(--warning)", unclear: "var(--text-4)" };
+const PLC_FLAG_COLOR = { strong: "var(--success)", watch: "var(--warning)", concern: "var(--danger)" };
+
+function PLCView({ apiKey }) {
+  const [meta, setMeta] = useState({ topic: "", team: "", facilitator: "", date: new Date().toISOString().split("T")[0] });
+  const [mode, setMode] = useState("manual");
+  const [notes, setNotes] = useState("");
+  const [isRecording, setIsRecording] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
+  const [recTime, setRecTime] = useState(0);
+  const [audioLevel, setAudioLevel] = useState(0.5);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState("");
+  const [result, setResult] = useState(null);
+  const fileRef = useRef(null);
+  const recognitionRef = useRef(null);
+  const timerRef = useRef(null);
+  const animRef = useRef(null);
+  const streamRef = useRef(null);
+
+  const setMf = (k, v) => setMeta(p => ({ ...p, [k]: v }));
+
+  useEffect(() => {
+    if (isRecording && !isPaused) timerRef.current = setInterval(() => setRecTime(t => t + 1), 1000);
+    else clearInterval(timerRef.current);
+    return () => clearInterval(timerRef.current);
+  }, [isRecording, isPaused]);
+
+  useEffect(() => () => {
+    clearInterval(timerRef.current);
+    cancelAnimationFrame(animRef.current);
+    streamRef.current?.getTracks().forEach(t => t.stop());
+    recognitionRef.current?.stop();
+  }, []);
+
+  const startRecording = async () => {
+    setNotes(""); setRecTime(0); setErr("");
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      const ctx = new AudioContext();
+      const src = ctx.createMediaStreamSource(stream);
+      const analyzerNode = ctx.createAnalyser();
+      analyzerNode.fftSize = 256;
+      src.connect(analyzerNode);
+      const tick = () => {
+        const buf = new Uint8Array(analyzerNode.frequencyBinCount);
+        analyzerNode.getByteFrequencyData(buf);
+        const avg = buf.reduce((a, b) => a + b, 0) / buf.length;
+        setAudioLevel(avg / 128);
+        animRef.current = requestAnimationFrame(tick);
+      };
+      tick();
+    } catch {}
+
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (SR) {
+      const r = new SR();
+      r.continuous = true; r.interimResults = true; r.lang = "en-US";
+      let final = "";
+      r.onresult = e => {
+        let interim = "";
+        for (let i = e.resultIndex; i < e.results.length; i++) {
+          if (e.results[i].isFinal) final += e.results[i][0].transcript + " ";
+          else interim = e.results[i][0].transcript;
+        }
+        setNotes(final + interim);
+      };
+      r.onerror = e => { if (e.error !== "aborted") setErr("Mic error: " + e.error); };
+      r.start();
+      recognitionRef.current = r;
+    } else {
+      setErr("Live transcription requires Chrome or Edge. Use Paste mode.");
+    }
+    setIsRecording(true); setIsPaused(false);
+  };
+
+  const stopRecording = () => {
+    setIsRecording(false); setIsPaused(false);
+    cancelAnimationFrame(animRef.current);
+    recognitionRef.current?.stop();
+    streamRef.current?.getTracks().forEach(t => t.stop());
+    setAudioLevel(0);
+  };
+
+  const togglePause = () => {
+    if (isPaused) recognitionRef.current?.start();
+    else recognitionRef.current?.stop();
+    setIsPaused(p => !p);
+  };
+
+  const handleFile = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!/\.(txt|md|markdown)$/i.test(file.name)) {
+      setErr("Only .txt or .md files can be uploaded directly — for other formats, paste the transcript text instead.");
+      return;
+    }
+    setErr("");
+    const reader = new FileReader();
+    reader.onload = () => setNotes(String(reader.result || ""));
+    reader.readAsText(file);
+  };
+
+  const analyze = async () => {
+    const text = notes.trim();
+    if (!text) { setErr("Please record, paste, or upload meeting notes first."); return; }
+    if (text.split(" ").length < 15) { setErr("This looks too short for a meaningful analysis."); return; }
+    setErr(""); setLoading(true); setResult(null);
+    try {
+      setResult(await analyzePLCMeeting(apiKey, text, meta));
+    } catch (e) {
+      setErr("Analysis failed: " + e.message + ". Check your API key in Settings.");
+    }
+    setLoading(false);
+  };
+
+  const copy = () => {
+    if (!result) return;
+    const lines = [
+      `PLC MEETING ANALYSIS`,
+      `Topic: ${meta.topic || "—"} | Team: ${meta.team || "—"} | Date: ${meta.date}`,
+      `Facilitator: ${meta.facilitator || "—"}`, "",
+      `SUMMARY`, result.summary, "",
+      `KEY DECISIONS`, ...(result.keyDecisions||[]).map(s=>"• "+s), "",
+      `ACTION ITEMS`, ...(result.actionItems||[]).map(a=>`• ${a.item} — Owner: ${a.owner} — Due: ${a.timeline}`), "",
+      `COLLABORATIVE INQUIRY / DATA-DRIVEN DISCUSSION`, ...(result.collaborativeInquiryEvidence||[]).map(s=>"• "+s), "",
+      `TEACHER LEARNING GOALS`, ...(result.teacherLearningGoals||[]).map(s=>"• "+s), "",
+      `STUDENT LEARNING NEEDS`, ...(result.studentLearningNeeds||[]).map(s=>"• "+s), "",
+      `FOLLOW-UP FOR NEXT MEETING`, ...(result.followUpRecommendations||[]).map(s=>"• "+s), "",
+      `ALIGNMENT TO IMPROVEMENT GOALS [${result.goalAlignment?.status || "unclear"}]`, result.goalAlignment?.note || "", "",
+      `NORMS ADHERENCE`, ...(result.normsObservations||[]).map(n=>`• [${n.flag}] ${n.area} — ${n.note}`), "",
+      `Generated by ClassroomLens Pro`,
+    ];
+    navigator.clipboard?.writeText(lines.join("\n"));
+    alert("Analysis copied to clipboard!");
+  };
+
+  return (
+    <div className="fade-up" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div style={{ background: "var(--accent-soft)", border: "1px solid #4f46e522", borderRadius: 8, padding: "10px 14px", fontSize: 12, color: "var(--text-3)", display: "flex", gap: 8, alignItems: "center" }}>
+        <Icon name="plc" size={15} />
+        Nothing here is saved automatically — this analysis exists only in your browser. Copy anything you want to keep before navigating away.
+      </div>
+
+      <Card>
+        <Label>Meeting Details</Label>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+          <TextInput label="Meeting Topic / Focus" value={meta.topic} onChange={v => setMf("topic", v)} />
+          <TextInput label="Team / Grade-Subject" value={meta.team} onChange={v => setMf("team", v)} />
+          <TextInput label="Facilitator" value={meta.facilitator} onChange={v => setMf("facilitator", v)} />
+          <TextInput label="Date" type="date" value={meta.date} onChange={v => setMf("date", v)} />
+        </div>
+      </Card>
+
+      <Card>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10, marginBottom: 14 }}>
+          <Label>Meeting Notes</Label>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <Btn variant={mode==="manual"?"primary":"ghost"} size="sm" onClick={() => setMode("manual")}>✏️ Paste / Type</Btn>
+            <Btn variant={mode==="live"?"primary":"ghost"} size="sm" onClick={() => setMode("live")}>🎙 Live Recording</Btn>
+            <Btn variant={mode==="transcript"?"primary":"ghost"} size="sm" onClick={() => setMode("transcript")}>📝 Upload Transcript</Btn>
+            {mode === "transcript" && <input ref={fileRef} type="file" accept=".txt,.md,.markdown" onChange={handleFile} style={{ display: "none" }} />}
+          </div>
+        </div>
+
+        {mode === "live" ? (
+          <div>
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 16, padding: "20px 0 4px", background: "var(--surface-2)", borderRadius: 10 }}>
+              <Waveform active={isRecording && !isPaused} level={audioLevel} />
+              {isRecording && (
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <div className="rec-pulse" style={{ width: 9, height: 9, background: "var(--danger)", borderRadius: "50%" }} />
+                  <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 20, color: "var(--danger)", fontWeight: 600 }}>{fmtTime(recTime)}</span>
+                  {isPaused && <Chip label="Paused" color="var(--warning)" />}
+                </div>
+              )}
+              <div style={{ display: "flex", gap: 10, paddingBottom: 20 }}>
+                {!isRecording
+                  ? <Btn size="lg" onClick={startRecording}>⏺ Start Recording</Btn>
+                  : <>
+                      <Btn variant="ghost" onClick={togglePause}>{isPaused ? "▶ Resume" : "⏸ Pause"}</Btn>
+                      <Btn variant="danger" onClick={stopRecording}>⏹ Stop</Btn>
+                    </>}
+              </div>
+            </div>
+            {notes && (
+              <div style={{ marginTop: 14, background: "var(--surface-2)", borderRadius: 8, padding: 14, maxHeight: 220, overflowY: "auto" }}>
+                <Label>Live Transcript</Label>
+                <p style={{ fontSize: 12, color: "var(--text-2)", lineHeight: 1.85, whiteSpace: "pre-wrap" }}>{notes}</p>
+              </div>
+            )}
+            {!notes && !isRecording && (
+              <p style={{ fontSize: 12, color: "var(--text-5)", textAlign: "center", marginTop: 8 }}>Press Start to record the meeting live. Transcript will appear as the team talks.</p>
+            )}
+          </div>
+        ) : mode === "transcript" ? (
+          <div>
+            <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 10 }}>
+              <Btn variant="ghost" size="sm" onClick={() => fileRef.current?.click()}>⬆ Upload .txt / .md</Btn>
+            </div>
+            <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={12}
+              placeholder={`Paste a pre-written transcript with speaker labels, or upload a .txt/.md file above.\n\nExample:\nFacilitator: Let's start with our 5th grade math data from the last unit assessment.\nTeacher A: About 60% of students hit the target on fractions, but subtraction with regrouping is still a gap.\nTeacher B: I'm seeing the same pattern in my class — want to try a shared reteach block next week?`}
+              style={{ width: "100%", background: "var(--surface-2)", border: "1px solid var(--border)", borderRadius: 9, padding: 14, color: "var(--text)", fontSize: 13, lineHeight: 1.85, outline: "none" }} />
+          </div>
+        ) : (
+          <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={12}
+            placeholder={`Paste your meeting notes or agenda here.\n\nInclude what you can:\n  • Data reviewed and what it showed\n  • Decisions made and why\n  • Action items and who owns them\n  • Questions or concerns raised\n  • Next steps`}
+            style={{ width: "100%", background: "var(--surface-2)", border: "1px solid var(--border)", borderRadius: 9, padding: 14, color: "var(--text)", fontSize: 13, lineHeight: 1.85, outline: "none" }} />
+        )}
+      </Card>
+
+      {err && <div style={{ background: "var(--danger-soft)", border: "1px solid #dc262622", borderRadius: 8, padding: "10px 14px", fontSize: 12, color: "var(--danger)" }}>{err}</div>}
+
+      <Btn onClick={analyze} disabled={loading} full size="lg">
+        {loading ? <span style={{ display:"flex",alignItems:"center",gap:12,justifyContent:"center" }}><Spinner />Analyzing PLC meeting…</span> : "⚡ Analyze PLC Meeting"}
+      </Btn>
+
+      {result && (
+        <div className="fade-up" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <Card style={{ borderTop: "3px solid var(--accent)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
+              <div>
+                <div style={{ fontSize: 17, fontWeight: 800, color: "var(--text)" }}>{meta.topic || "PLC Meeting"}{meta.team && ` — ${meta.team}`}</div>
+                <div style={{ fontSize: 12, color: "var(--text-4)", marginTop: 3 }}>{meta.date}{meta.facilitator && ` · Facilitator: ${meta.facilitator}`}</div>
+                <p style={{ fontSize: 13, color: "var(--text-2)", lineHeight: 1.75, marginTop: 12 }}>{result.summary}</p>
+              </div>
+              <Btn size="sm" variant="outline" onClick={copy}>📋 Copy Analysis</Btn>
+            </div>
+          </Card>
+
+          {result.keyDecisions?.length > 0 && (
+            <Card>
+              <Label>Key Decisions</Label>
+              {result.keyDecisions.map((s,i) => (
+                <div key={i} style={{ display: "flex", gap: 10, marginBottom: 8 }}>
+                  <span style={{ color: "var(--accent)", flexShrink: 0, fontWeight: 800 }}>▸</span>
+                  <span style={{ fontSize: 13, color: "var(--text-2)", lineHeight: 1.65 }}>{s}</span>
+                </div>
+              ))}
+            </Card>
+          )}
+
+          {result.actionItems?.length > 0 && (
+            <Card>
+              <Label>Action Items</Label>
+              {result.actionItems.map((a,i) => (
+                <div key={i} style={{ background: "var(--surface-2)", borderRadius: 8, padding: 12, marginBottom: 8 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text)", marginBottom: 6 }}>{a.item}</div>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <Chip label={`Owner: ${a.owner}`} color="var(--accent)" />
+                    <Chip label={`Due: ${a.timeline}`} color="var(--text-4)" />
+                  </div>
+                </div>
+              ))}
+            </Card>
+          )}
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <Card accent="#16a34a">
+              <Label color="var(--success)">Teacher Learning Goals</Label>
+              {(result.teacherLearningGoals||[]).map((s,i) => <div key={i} style={{ fontSize: 12, color: "var(--text-2)", lineHeight: 1.7, marginBottom: 8, paddingLeft: 10, borderLeft: "2px solid #16a34a33" }}>{s}</div>)}
+              {!result.teacherLearningGoals?.length && <p style={{ fontSize: 12, color: "var(--text-5)" }}>None noted.</p>}
+            </Card>
+            <Card accent="#d97706">
+              <Label color="var(--warning)">Student Learning Needs</Label>
+              {(result.studentLearningNeeds||[]).map((s,i) => <div key={i} style={{ fontSize: 12, color: "var(--text-2)", lineHeight: 1.7, marginBottom: 8, paddingLeft: 10, borderLeft: "2px solid #d9770633" }}>{s}</div>)}
+              {!result.studentLearningNeeds?.length && <p style={{ fontSize: 12, color: "var(--text-5)" }}>None noted.</p>}
+            </Card>
+          </div>
+
+          {result.collaborativeInquiryEvidence?.length > 0 && (
+            <Card>
+              <Label>Evidence of Collaborative Inquiry & Data-Driven Discussion</Label>
+              {result.collaborativeInquiryEvidence.map((e,i) => (
+                <div key={i} style={{ fontSize: 12, color: "var(--text-3)", background: "var(--surface-2)", borderRadius: 5, padding: "7px 12px", marginBottom: 6, lineHeight: 1.6 }}>❝ {e}</div>
+              ))}
+            </Card>
+          )}
+
+          {result.goalAlignment && (
+            <Card>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
+                <Label>Alignment to School / District Improvement Goals</Label>
+                <Chip label={result.goalAlignment.status} color={PLC_STATUS_COLOR[result.goalAlignment.status] || "var(--text-4)"} />
+              </div>
+              <p style={{ fontSize: 13, color: "var(--text-2)", lineHeight: 1.7 }}>{result.goalAlignment.note}</p>
+            </Card>
+          )}
+
+          {result.followUpRecommendations?.length > 0 && (
+            <Card accent="#4f46e5">
+              <Label color="var(--accent)">Follow-Up for Next PLC Meeting</Label>
+              {result.followUpRecommendations.map((s,i) => (
+                <div key={i} style={{ display: "flex", gap: 10, marginBottom: 8 }}>
+                  <span style={{ color: "var(--accent)", flexShrink: 0, fontWeight: 800 }}>▸</span>
+                  <span style={{ fontSize: 13, color: "var(--text-2)", lineHeight: 1.65 }}>{s}</span>
+                </div>
+              ))}
+            </Card>
+          )}
+
+          {result.normsObservations?.length > 0 && (
+            <Card>
+              <Label>Norms Adherence Observations</Label>
+              {result.normsObservations.map((n,i) => (
+                <div key={i} style={{ background: "var(--surface-2)", borderRadius: 8, padding: 12, marginBottom: 8, borderLeft: `3px solid ${PLC_FLAG_COLOR[n.flag] || "var(--text-4)"}` }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", marginBottom: 5 }}>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text)" }}>{n.area}</span>
+                    <Chip label={n.flag} color={PLC_FLAG_COLOR[n.flag] || "var(--text-4)"} />
+                  </div>
+                  <p style={{ fontSize: 12, color: "var(--text-3)", lineHeight: 1.6 }}>{n.note}</p>
+                </div>
+              ))}
+            </Card>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LESSON PLAN ANALYZER (stateless — nothing is saved)
+// ─────────────────────────────────────────────────────────────────────────────
+const DIMENSION_LABELS = {
+  standardsAlignment: "Standards Alignment",
+  instructionalDesign: "Instructional Design",
+  differentiation: "Differentiation",
+  assessmentStrategy: "Assessment Strategy",
+};
+const DIMENSION_RATING_LABEL = { 1: "Needs Work", 2: "Developing", 3: "Solid", 4: "Strong" };
+
+function LessonPlanView({ apiKey }) {
+  const [meta, setMeta] = useState({ title: "", grade: "", subject: "" });
+  const [framework, setFramework] = useState("danielson");
+  const [mode, setMode] = useState("manual");
+  const [planText, setPlanText] = useState("");
+  const [isRecording, setIsRecording] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
+  const [recTime, setRecTime] = useState(0);
+  const [audioLevel, setAudioLevel] = useState(0.5);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState("");
+  const [result, setResult] = useState(null);
+  const fileRef = useRef(null);
+  const recognitionRef = useRef(null);
+  const timerRef = useRef(null);
+  const animRef = useRef(null);
+  const streamRef = useRef(null);
+
+  const setMf = (k, v) => setMeta(p => ({ ...p, [k]: v }));
+  const fw = FRAMEWORKS[framework];
+
+  useEffect(() => {
+    if (isRecording && !isPaused) timerRef.current = setInterval(() => setRecTime(t => t + 1), 1000);
+    else clearInterval(timerRef.current);
+    return () => clearInterval(timerRef.current);
+  }, [isRecording, isPaused]);
+
+  useEffect(() => () => {
+    clearInterval(timerRef.current);
+    cancelAnimationFrame(animRef.current);
+    streamRef.current?.getTracks().forEach(t => t.stop());
+    recognitionRef.current?.stop();
+  }, []);
+
+  const startRecording = async () => {
+    setPlanText(""); setRecTime(0); setErr("");
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      const ctx = new AudioContext();
+      const src = ctx.createMediaStreamSource(stream);
+      const analyzerNode = ctx.createAnalyser();
+      analyzerNode.fftSize = 256;
+      src.connect(analyzerNode);
+      const tick = () => {
+        const buf = new Uint8Array(analyzerNode.frequencyBinCount);
+        analyzerNode.getByteFrequencyData(buf);
+        const avg = buf.reduce((a, b) => a + b, 0) / buf.length;
+        setAudioLevel(avg / 128);
+        animRef.current = requestAnimationFrame(tick);
+      };
+      tick();
+    } catch {}
+
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (SR) {
+      const r = new SR();
+      r.continuous = true; r.interimResults = true; r.lang = "en-US";
+      let final = "";
+      r.onresult = e => {
+        let interim = "";
+        for (let i = e.resultIndex; i < e.results.length; i++) {
+          if (e.results[i].isFinal) final += e.results[i][0].transcript + " ";
+          else interim = e.results[i][0].transcript;
+        }
+        setPlanText(final + interim);
+      };
+      r.onerror = e => { if (e.error !== "aborted") setErr("Mic error: " + e.error); };
+      r.start();
+      recognitionRef.current = r;
+    } else {
+      setErr("Live transcription requires Chrome or Edge. Use Paste mode.");
+    }
+    setIsRecording(true); setIsPaused(false);
+  };
+
+  const stopRecording = () => {
+    setIsRecording(false); setIsPaused(false);
+    cancelAnimationFrame(animRef.current);
+    recognitionRef.current?.stop();
+    streamRef.current?.getTracks().forEach(t => t.stop());
+    setAudioLevel(0);
+  };
+
+  const togglePause = () => {
+    if (isPaused) recognitionRef.current?.start();
+    else recognitionRef.current?.stop();
+    setIsPaused(p => !p);
+  };
+
+  const handleFile = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!/\.(txt|md|markdown)$/i.test(file.name)) {
+      setErr("Only .txt or .md files can be uploaded directly — for PDF or Word docs, copy and paste the text instead.");
+      return;
+    }
+    setErr("");
+    const reader = new FileReader();
+    reader.onload = () => setPlanText(String(reader.result || ""));
+    reader.readAsText(file);
+  };
+
+  const analyze = async () => {
+    const text = planText.trim();
+    if (!text) { setErr("Please paste or upload a lesson plan first."); return; }
+    if (text.split(" ").length < 20) { setErr("This looks too short to be a full lesson plan."); return; }
+    setErr(""); setLoading(true); setResult(null);
+    try {
+      setResult(await analyzeLessonPlan(apiKey, text, framework));
+    } catch (e) {
+      setErr("Analysis failed: " + e.message + ". Check your API key in Settings.");
+    }
+    setLoading(false);
+  };
+
+  const copy = () => {
+    if (!result) return;
+    const lines = [
+      `LESSON PLAN ANALYSIS — ${fw.shortName}`,
+      `${meta.title || "Untitled Lesson"}${meta.subject ? " · " + meta.subject : ""}${meta.grade ? " · Gr " + meta.grade : ""}`, "",
+      `SUMMARY`, result.summary, "",
+      ...Object.entries(result.dimensions || {}).flatMap(([k, d]) => [`${(DIMENSION_LABELS[k]||k).toUpperCase()} — ${DIMENSION_RATING_LABEL[d.rating]||d.rating}`, d.notes, ""]),
+      `SUGGESTIONS FOR IMPROVEMENT`, ...(result.suggestions||[]).map(s=>"• "+s), "",
+      `Generated by ClassroomLens Pro`,
+    ];
+    navigator.clipboard?.writeText(lines.join("\n"));
+    alert("Analysis copied to clipboard!");
+  };
+
+  return (
+    <div className="fade-up" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <Card>
+        <Label>Lesson Details</Label>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+          <TextInput label="Lesson Title / Topic" value={meta.title} onChange={v => setMf("title", v)} />
+          <TextInput label="Subject" value={meta.subject} onChange={v => setMf("subject", v)} />
+          <TextInput label="Grade Level" value={meta.grade} onChange={v => setMf("grade", v)} />
+        </div>
+      </Card>
+
+      <Card>
+        <Label>Evaluation Framework</Label>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 8 }}>
+          {Object.entries(FRAMEWORKS).map(([key, f]) => (
+            <div key={key} onClick={() => setFramework(key)}
+              style={{ background: framework===key ? f.color+"12" : "var(--surface)", border: `1.5px solid ${framework===key ? f.color : "var(--border-strong)"}`,
+                borderRadius: 9, padding: "12px 10px", cursor: "pointer", textAlign: "center", transition: "all .15s", boxShadow: framework===key ? "var(--shadow-sm)" : "none" }}>
+              <div style={{ fontSize: 12, fontWeight: 800, color: framework===key ? f.color : "var(--text-3)" }}>{f.shortName}</div>
+              <div style={{ fontSize: 9, color: "var(--text-5)", marginTop: 3 }}>v{f.version}</div>
+            </div>
+          ))}
+        </div>
+      </Card>
+
+      <Card>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10, marginBottom: 14 }}>
+          <Label>Lesson Plan</Label>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <Btn variant={mode==="manual"?"primary":"ghost"} size="sm" onClick={() => setMode("manual")}>✏️ Paste / Type</Btn>
+            <Btn variant={mode==="live"?"primary":"ghost"} size="sm" onClick={() => setMode("live")}>🎙 Live Recording</Btn>
+            {mode === "manual" && <Btn variant="ghost" size="sm" onClick={() => fileRef.current?.click()}>⬆ Upload .txt / .md</Btn>}
+            <input ref={fileRef} type="file" accept=".txt,.md,.markdown" onChange={handleFile} style={{ display: "none" }} />
+          </div>
+        </div>
+
+        {mode === "live" ? (
+          <div>
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 16, padding: "20px 0 4px", background: "var(--surface-2)", borderRadius: 10 }}>
+              <Waveform active={isRecording && !isPaused} level={audioLevel} />
+              {isRecording && (
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <div className="rec-pulse" style={{ width: 9, height: 9, background: "var(--danger)", borderRadius: "50%" }} />
+                  <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 20, color: "var(--danger)", fontWeight: 600 }}>{fmtTime(recTime)}</span>
+                  {isPaused && <Chip label="Paused" color="var(--warning)" />}
+                </div>
+              )}
+              <div style={{ display: "flex", gap: 10, paddingBottom: 20 }}>
+                {!isRecording
+                  ? <Btn size="lg" onClick={startRecording}>⏺ Start Recording</Btn>
+                  : <>
+                      <Btn variant="ghost" onClick={togglePause}>{isPaused ? "▶ Resume" : "⏸ Pause"}</Btn>
+                      <Btn variant="danger" onClick={stopRecording}>⏹ Stop</Btn>
+                    </>}
+              </div>
+            </div>
+            {planText && (
+              <div style={{ marginTop: 14, background: "var(--surface-2)", borderRadius: 8, padding: 14, maxHeight: 220, overflowY: "auto" }}>
+                <Label>Live Transcript</Label>
+                <p style={{ fontSize: 12, color: "var(--text-2)", lineHeight: 1.85, whiteSpace: "pre-wrap" }}>{planText}</p>
+              </div>
+            )}
+            {!planText && !isRecording && (
+              <p style={{ fontSize: 12, color: "var(--text-5)", textAlign: "center", marginTop: 8 }}>Press Start and talk through your lesson plan — objectives, activities, differentiation, assessment. Transcript will appear live.</p>
+            )}
+          </div>
+        ) : (
+          <div>
+            <textarea value={planText} onChange={e => setPlanText(e.target.value)} rows={14}
+              placeholder={`Paste your lesson plan here, or upload a .txt/.md file above.\n\nInclude what you can:\n  • Objectives / standards addressed\n  • Warm-up, instruction, guided/independent practice, closure\n  • Materials and resources\n  • Differentiation and accommodations\n  • Assessment / checks for understanding`}
+              style={{ width: "100%", background: "var(--surface-2)", border: "1px solid var(--border)", borderRadius: 9, padding: 14, color: "var(--text)", fontSize: 13, lineHeight: 1.85, outline: "none" }} />
+            <div style={{ fontSize: 11, color: "var(--text-5)", marginTop: 6, textAlign: "right" }}>{planText.split(" ").filter(Boolean).length} words</div>
+          </div>
+        )}
+      </Card>
+
+      {err && <div style={{ background: "var(--danger-soft)", border: "1px solid #dc262622", borderRadius: 8, padding: "10px 14px", fontSize: 12, color: "var(--danger)" }}>{err}</div>}
+
+      <Btn onClick={analyze} disabled={loading} full size="lg">
+        {loading ? <span style={{ display:"flex",alignItems:"center",gap:12,justifyContent:"center" }}><Spinner />Analyzing against {fw.shortName}…</span> : `⚡ Analyze Lesson Plan — ${fw.shortName} Framework`}
+      </Btn>
+
+      {result && (
+        <div className="fade-up" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <Card style={{ borderTop: `3px solid ${fw.color}` }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
+              <div>
+                <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+                  <Chip label={fw.shortName} color={fw.color} size="md" />
+                  {meta.subject && <Chip label={meta.subject} color="var(--text-4)" size="md" />}
+                  {meta.grade && <Chip label={`Gr ${meta.grade}`} color="var(--text-4)" size="md" />}
+                </div>
+                <div style={{ fontSize: 17, fontWeight: 800, color: "var(--text)" }}>{meta.title || "Lesson Plan"}</div>
+                <p style={{ fontSize: 13, color: "var(--text-2)", lineHeight: 1.75, marginTop: 10 }}>{result.summary}</p>
+              </div>
+              <Btn size="sm" variant="outline" onClick={copy}>📋 Copy Analysis</Btn>
+            </div>
+          </Card>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 10 }}>
+            {Object.entries(result.dimensions || {}).map(([k, d]) => (
+              <Card key={k}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+                  <div style={{ fontSize: 12, color: "var(--text-2)", fontWeight: 700 }}>{DIMENSION_LABELS[k] || k}</div>
+                  <Chip label={DIMENSION_RATING_LABEL[d.rating] || d.rating} color={ratingColor(d.rating)} />
+                </div>
+                <RatingBar value={d.rating || 0} max={4} color={ratingColor(d.rating)} />
+                <p style={{ fontSize: 12, color: "var(--text-3)", lineHeight: 1.65, marginTop: 10 }}>{d.notes}</p>
+                {d.opportunities?.length > 0 && (
+                  <div style={{ marginTop: 8 }}>
+                    {d.opportunities.map((o,i) => (
+                      <div key={i} style={{ fontSize: 11, color: "var(--text-3)", background: "var(--surface-2)", borderRadius: 5, padding: "5px 10px", marginBottom: 4, lineHeight: 1.6 }}>▸ {o}</div>
+                    ))}
+                  </div>
+                )}
+              </Card>
+            ))}
+          </div>
+
+          {result.suggestions?.length > 0 && (
+            <Card accent="#4f46e5">
+              <Label color="var(--accent)">Suggestions for Improvement</Label>
+              {result.suggestions.map((s,i) => (
+                <div key={i} style={{ display: "flex", gap: 10, marginBottom: 8 }}>
+                  <span style={{ color: "var(--accent)", flexShrink: 0, fontWeight: 800 }}>▸</span>
+                  <span style={{ fontSize: 13, color: "var(--text-2)", lineHeight: 1.65 }}>{s}</span>
+                </div>
+              ))}
+            </Card>
+          )}
+
+          {result.evidence && Object.keys(result.evidence).length > 0 && (
+            <Card>
+              <Label>Framework Mapping — {fw.shortName}</Label>
+              <FrameworkEvidenceBlock fw={fw} evidence={result.evidence} apiKey={apiKey} />
+            </Card>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DASHBOARD
+// ─────────────────────────────────────────────────────────────────────────────
+function DashboardView({ sessions, onSelect, onNew }) {
   const [filter, setFilter] = useState("all");
   const filtered = filter === "all" ? sessions : sessions.filter(s => s.framework === filter);
-  const avgOverall = filtered.length ? (filtered.reduce((a,s) => a + (s.analysis?.overallRating||0), 0) / filtered.length).toFixed(2) : "—";
+  const avgOverall = sessions.length ? (sessions.reduce((a,s) => a + (s.analysis?.overallRating||0), 0) / sessions.length).toFixed(2) : "—";
   const needsSupport = sessions.filter(s => s.analysis?.overallRating && s.analysis.overallRating < 2.5);
   const teachers = [...new Set(sessions.map(s => s.meta.teacher).filter(Boolean))];
+  const recent = [...sessions].sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp)).slice(0, 5);
+
+  if (sessions.length === 0) {
+    return (
+      <div className="fade-up">
+        <Card style={{ textAlign: "center", padding: "64px 32px" }}>
+          <div style={{ width: 52, height: 52, background: "var(--accent-soft)", borderRadius: 14, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 18px" }}>
+            <Icon name="dashboard" size={24} />
+          </div>
+          <div style={{ fontSize: 17, fontWeight: 800, color: "var(--text)", marginBottom: 8 }}>Welcome to ClassroomLens Pro</div>
+          <p style={{ fontSize: 13, color: "var(--text-4)", maxWidth: 420, margin: "0 auto 22px", lineHeight: 1.7 }}>
+            Your dashboard will fill in with school-wide trends once you've logged your first observation.
+          </p>
+          <Btn size="lg" onClick={onNew}>+ New Observation</Btn>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="fade-up" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       {/* Stats */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 10 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12 }}>
         {[
-          { label: "Total Observations", value: sessions.length, color: "#3b82f6", icon: "📋" },
-          { label: "School Average", value: avgOverall, color: "#22c55e", icon: "⭐" },
-          { label: "Needs Support", value: needsSupport.length, color: "#ef4444", icon: "🚨" },
-          { label: "Teachers Observed", value: teachers.length, color: "#f59e0b", icon: "👩‍🏫" },
+          { label: "Total Observations", value: sessions.length, color: "#4f46e5", icon: "report" },
+          { label: "School Average", value: avgOverall, color: "#16a34a", icon: "growth" },
+          { label: "Needs Support", value: needsSupport.length, color: "#dc2626", icon: "coaching" },
+          { label: "Teachers Observed", value: teachers.length, color: "#d97706", icon: "sessions" },
         ].map(s => (
           <Card key={s.label}>
-            <div style={{ fontSize: 22, marginBottom: 6 }}>{s.icon}</div>
-            <div style={{ fontSize: 28, fontWeight: 800, color: s.color, fontFamily: "'JetBrains Mono',monospace" }}>{s.value}</div>
-            <div style={{ fontSize: 11, color: "#475569", marginTop: 3 }}>{s.label}</div>
+            <div style={{ width: 34, height: 34, background: s.color + "14", borderRadius: 9, display: "flex", alignItems: "center", justifyContent: "center", color: s.color, marginBottom: 12 }}>
+              <Icon name={s.icon} size={17} />
+            </div>
+            <div style={{ fontSize: 26, fontWeight: 800, color: "var(--text)", fontFamily: "'JetBrains Mono',monospace" }}>{s.value}</div>
+            <div style={{ fontSize: 11, color: "var(--text-4)", marginTop: 3 }}>{s.label}</div>
           </Card>
         ))}
       </div>
 
-      {/* Framework breakdown */}
-      <Card>
-        <Label>Observations by Framework</Label>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 8 }}>
-          {Object.entries(FRAMEWORKS).map(([fk, f]) => {
-            const count = sessions.filter(s => s.framework === fk).length;
-            const rated = sessions.filter(s => s.framework === fk && s.analysis?.overallRating);
-            const avg = rated.length ? (rated.reduce((a,s) => a+s.analysis.overallRating,0)/rated.length).toFixed(1) : "—";
-            return (
-              <div key={fk} style={{ background: "#0a0d12", borderRadius: 8, padding: 12, borderTop: `3px solid ${f.color}` }}>
-                <div style={{ fontSize: 11, fontWeight: 800, color: f.color }}>{f.shortName}</div>
-                <div style={{ fontSize: 24, fontWeight: 800, color: "#e6edf3", fontFamily: "'JetBrains Mono',monospace", marginTop: 4 }}>{count}</div>
-                <div style={{ fontSize: 10, color: "#475569" }}>obs · avg {avg}</div>
-              </div>
-            );
-          })}
-        </div>
-      </Card>
+      <div style={{ display: "grid", gridTemplateColumns: "1.3fr 1fr", gap: 16, alignItems: "start" }}>
+        {/* Framework breakdown */}
+        <Card>
+          <Label>Observations by Framework</Label>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(110px,1fr))", gap: 8 }}>
+            {Object.entries(FRAMEWORKS).map(([fk, f]) => {
+              const count = sessions.filter(s => s.framework === fk).length;
+              const rated = sessions.filter(s => s.framework === fk && s.analysis?.overallRating);
+              const avg = rated.length ? (rated.reduce((a,s) => a+s.analysis.overallRating,0)/rated.length).toFixed(1) : "—";
+              return (
+                <div key={fk} style={{ background: "var(--surface-2)", borderRadius: 9, padding: 12, borderTop: `3px solid ${f.color}` }}>
+                  <div style={{ fontSize: 11, fontWeight: 800, color: f.color }}>{f.shortName}</div>
+                  <div style={{ fontSize: 22, fontWeight: 800, color: "var(--text)", fontFamily: "'JetBrains Mono',monospace", marginTop: 4 }}>{count}</div>
+                  <div style={{ fontSize: 10, color: "var(--text-4)" }}>obs · avg {avg}</div>
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+
+        {/* Recent activity */}
+        <Card>
+          <Label>Recent Observations</Label>
+          {recent.length === 0
+            ? <p style={{ fontSize: 12, color: "var(--text-5)" }}>No observations yet.</p>
+            : recent.map(s => {
+                const fw = FRAMEWORKS[s.framework];
+                return (
+                  <div key={s.id} onClick={() => onSelect(s)}
+                    style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "9px 8px", borderRadius: 7, cursor: "pointer" }}
+                    onMouseEnter={e => e.currentTarget.style.background = "var(--surface-2)"}
+                    onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{s.meta.teacher || "Untitled"}</div>
+                      <div style={{ fontSize: 10, color: "var(--text-5)" }}>{fw?.shortName} · {s.meta.date}</div>
+                    </div>
+                    {s.analysis?.overallRating && <Chip label={s.analysis.overallRating.toFixed(1)} color={ratingColor(Math.round(s.analysis.overallRating))} />}
+                  </div>
+                );
+              })}
+        </Card>
+      </div>
 
       {/* Needs support */}
       {needsSupport.length > 0 && (
-        <Card accent="#ef4444">
-          <Label color="#ef4444">🚨 Teachers Needing Support (Rating Below 2.5)</Label>
+        <Card accent="#dc2626">
+          <Label color="var(--danger)">Teachers Needing Support (Rating Below 2.5)</Label>
           {needsSupport.map(s => {
             const fw = FRAMEWORKS[s.framework];
             return (
-              <div key={s.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "#0a0d12", borderRadius: 7, padding: "10px 12px", marginBottom: 6, flexWrap: "wrap", gap: 8 }}>
+              <div key={s.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "var(--surface-2)", borderRadius: 7, padding: "10px 12px", marginBottom: 6, flexWrap: "wrap", gap: 8 }}>
                 <div>
-                  <span style={{ fontWeight: 700, fontSize: 13, color: "#e6edf3" }}>{s.meta.teacher}</span>
-                  <span style={{ color: "#475569", fontSize: 11, marginLeft: 8 }}>{s.meta.subject} · Gr {s.meta.grade}</span>
-                  <span style={{ color: "#334155", fontSize: 10, marginLeft: 8 }}>{s.meta.date}</span>
+                  <span style={{ fontWeight: 700, fontSize: 13, color: "var(--text)" }}>{s.meta.teacher}</span>
+                  <span style={{ color: "var(--text-4)", fontSize: 11, marginLeft: 8 }}>{s.meta.subject} · Gr {s.meta.grade}</span>
+                  <span style={{ color: "var(--text-5)", fontSize: 10, marginLeft: 8 }}>{s.meta.date}</span>
                 </div>
                 <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                   <Chip label={fw?.shortName} color={fw?.color} />
-                  <span style={{ fontWeight: 800, color: "#ef4444", fontFamily: "'JetBrains Mono',monospace" }}>{s.analysis.overallRating?.toFixed(1)}</span>
+                  <span style={{ fontWeight: 800, color: "var(--danger)", fontFamily: "'JetBrains Mono',monospace" }}>{s.analysis.overallRating?.toFixed(1)}</span>
                 </div>
               </div>
             );
@@ -1346,14 +2340,14 @@ function AdminDashboard({ sessions }) {
           </div>
         </div>
         {filtered.length === 0
-          ? <p style={{ fontSize: 12, color: "#334155", textAlign: "center", padding: 30 }}>No observations yet. Complete your first observation to see data here.</p>
+          ? <p style={{ fontSize: 12, color: "var(--text-5)", textAlign: "center", padding: 30 }}>No observations match this filter.</p>
           : (
             <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
                 <thead>
-                  <tr style={{ borderBottom: "1px solid #21262d" }}>
+                  <tr style={{ borderBottom: "1px solid var(--border)" }}>
                     {["Teacher","Subject","Grade","Date","Framework","Rating","Overall","Observer"].map(h => (
-                      <th key={h} style={{ textAlign: "left", padding: "8px 10px", color: "#475569", fontWeight: 700, fontSize: 10, letterSpacing: "0.08em", whiteSpace: "nowrap" }}>{h}</th>
+                      <th key={h} style={{ textAlign: "left", padding: "8px 10px", color: "var(--text-4)", fontWeight: 700, fontSize: 10, letterSpacing: "0.08em", whiteSpace: "nowrap" }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
@@ -1362,17 +2356,17 @@ function AdminDashboard({ sessions }) {
                     const fw = FRAMEWORKS[s.framework];
                     const r = s.analysis?.overallRating;
                     return (
-                      <tr key={s.id} style={{ borderBottom: "1px solid #0d1117", transition: "background .1s" }}
-                        onMouseEnter={e => e.currentTarget.style.background="#0a0d12"}
+                      <tr key={s.id} onClick={() => onSelect(s)} style={{ borderBottom: "1px solid var(--border)", transition: "background .1s", cursor: "pointer" }}
+                        onMouseEnter={e => e.currentTarget.style.background="var(--surface-2)"}
                         onMouseLeave={e => e.currentTarget.style.background="transparent"}>
-                        <td style={{ padding:"9px 10px",color:"#e6edf3",fontWeight:600 }}>{s.meta.teacher || "—"}</td>
-                        <td style={{ padding:"9px 10px",color:"#64748b" }}>{s.meta.subject || "—"}</td>
-                        <td style={{ padding:"9px 10px",color:"#64748b" }}>{s.meta.grade || "—"}</td>
-                        <td style={{ padding:"9px 10px",color:"#64748b" }}>{s.meta.date}</td>
-                        <td style={{ padding:"9px 10px" }}><Chip label={fw?.shortName} color={fw?.color} /></td>
-                        <td style={{ padding:"9px 10px" }}>{r ? <Chip label={fw?.ratingScale[Math.round(r)]} color={ratingColor(Math.round(r))} /> : "—"}</td>
-                        <td style={{ padding:"9px 10px",fontWeight:800,color:r?ratingColor(Math.round(r)):"#334155",fontFamily:"'JetBrains Mono',monospace" }}>{r?.toFixed(1) || "—"}</td>
-                        <td style={{ padding:"9px 10px",color:"#64748b" }}>{s.meta.observer || "—"}</td>
+                        <td style={{ padding:"10px 10px",color:"var(--text)",fontWeight:600 }}>{s.meta.teacher || "—"}</td>
+                        <td style={{ padding:"10px 10px",color:"var(--text-3)" }}>{s.meta.subject || "—"}</td>
+                        <td style={{ padding:"10px 10px",color:"var(--text-3)" }}>{s.meta.grade || "—"}</td>
+                        <td style={{ padding:"10px 10px",color:"var(--text-3)" }}>{s.meta.date}</td>
+                        <td style={{ padding:"10px 10px" }}><Chip label={fw?.shortName} color={fw?.color} /></td>
+                        <td style={{ padding:"10px 10px" }}>{r ? <Chip label={fw?.ratingScale[Math.round(r)]} color={ratingColor(Math.round(r))} /> : "—"}</td>
+                        <td style={{ padding:"10px 10px",fontWeight:800,color:r?ratingColor(Math.round(r)):"var(--text-5)",fontFamily:"'JetBrains Mono',monospace" }}>{r?.toFixed(1) || "—"}</td>
+                        <td style={{ padding:"10px 10px",color:"var(--text-3)" }}>{s.meta.observer || "—"}</td>
                       </tr>
                     );
                   })}
@@ -1388,33 +2382,36 @@ function AdminDashboard({ sessions }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // SESSIONS LIST
 // ─────────────────────────────────────────────────────────────────────────────
-function SessionsList({ sessions, onSelect, onDelete }) {
+function SessionsList({ sessions, loading, currentUserId, onSelect, onDelete }) {
+  if (loading) return <EmptyState icon="⏳" text="Loading your sessions from the cloud…" />;
   if (sessions.length === 0) return <EmptyState icon="📁" text="No saved sessions yet. Complete your first observation." />;
   return (
     <div className="fade-up" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <div style={{ fontSize: 11, color: "#334155", marginBottom: 4 }}>{sessions.length} saved session{sessions.length!==1?"s":""} · stored locally on this device</div>
+      <div style={{ fontSize: 11, color: "var(--text-5)", marginBottom: 4 }}>{sessions.length} saved session{sessions.length!==1?"s":""} · synced to your account</div>
       {sessions.map(s => {
         const fw = FRAMEWORKS[s.framework];
         return (
-          <div key={s.id} style={{ background: "#0d1117", border: "1px solid #21262d", borderRadius: 10, padding: 16, transition: "border-color .15s" }}
+          <div key={s.id} style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, padding: 16, boxShadow: "var(--shadow-sm)", transition: "border-color .15s" }}
             onMouseEnter={e => e.currentTarget.style.borderColor=fw.color}
-            onMouseLeave={e => e.currentTarget.style.borderColor="#21262d"}>
+            onMouseLeave={e => e.currentTarget.style.borderColor="var(--border)"}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8, gap: 8 }}>
               <div style={{ cursor: "pointer", flex: 1 }} onClick={() => onSelect(s)}>
                 <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                  <span style={{ fontWeight: 700, fontSize: 14, color: "#e6edf3" }}>{s.meta.teacher || "Unknown Teacher"}</span>
+                  <span style={{ fontWeight: 700, fontSize: 14, color: "var(--text)" }}>{s.meta.teacher || "Unknown Teacher"}</span>
                   <Chip label={fw.shortName} color={fw.color} />
                   {s.analysis?.overallRating && <Chip label={`${s.analysis.overallRating.toFixed(1)} — ${fw.ratingScale[Math.round(s.analysis.overallRating)]}`} color={ratingColor(Math.round(s.analysis.overallRating))} />}
                 </div>
-                <div style={{ color: "#475569", fontSize: 11, marginTop: 3 }}>{s.meta.subject} · Gr {s.meta.grade} · {s.meta.school}</div>
+                <div style={{ color: "var(--text-4)", fontSize: 11, marginTop: 3 }}>{s.meta.subject} · Gr {s.meta.grade} · {s.meta.school}</div>
               </div>
               <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
                 <Btn size="sm" variant="outline" onClick={() => onSelect(s)}>View</Btn>
-                <Btn size="sm" variant="danger" onClick={() => { if(confirm("Delete this session?")) onDelete(s.id); }}>✕</Btn>
+                {(!currentUserId || s.userId === currentUserId) && (
+                  <Btn size="sm" variant="danger" onClick={() => { if(confirm("Delete this session?")) onDelete(s.id); }}>✕</Btn>
+                )}
               </div>
             </div>
-            <p style={{ fontSize: 12, color: "#475569", lineHeight: 1.55 }}>{s.analysis?.summary?.slice(0,120)}…</p>
-            <div style={{ fontSize: 10, color: "#21262d", marginTop: 8 }}>{s.timestamp}</div>
+            <p style={{ fontSize: 12, color: "var(--text-4)", lineHeight: 1.55 }}>{s.analysis?.summary?.slice(0,120)}…</p>
+            <div style={{ fontSize: 10, color: "var(--text-faint)", marginTop: 8 }}>{s.timestamp}</div>
           </div>
         );
       })}
@@ -1425,10 +2422,11 @@ function SessionsList({ sessions, onSelect, onDelete }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // SETTINGS VIEW
 // ─────────────────────────────────────────────────────────────────────────────
-function SettingsView({ apiKey, onChangeKey, onClearSessions, sessionCount }) {
+function SettingsView({ apiKey, onChangeKey, onClearSessions, sessionCount, legacyCount, onImportLegacy }) {
   const [newKey, setNewKey] = useState("");
   const [testing, setTesting] = useState(false);
   const [msg, setMsg] = useState("");
+  const [importing, setImporting] = useState(false);
 
   const saveKey = async () => {
     if (!newKey.trim()) return;
@@ -1447,20 +2445,20 @@ function SettingsView({ apiKey, onChangeKey, onClearSessions, sessionCount }) {
     <div className="fade-up" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <Card>
         <Label>API Key</Label>
-        <div style={{ fontSize: 12, color: "#64748b", marginBottom: 12 }}>
-          Current key: <span style={{ fontFamily:"'JetBrains Mono',monospace",color:"#475569" }}>{apiKey ? apiKey.slice(0,18)+"…" : "Not set"}</span>
+        <div style={{ fontSize: 12, color: "var(--text-3)", marginBottom: 12 }}>
+          Current key: <span style={{ fontFamily:"'JetBrains Mono',monospace",color:"var(--text-4)" }}>{apiKey ? apiKey.slice(0,18)+"…" : "Not set"}</span>
         </div>
         <TextInput label="New API Key" value={newKey} onChange={setNewKey} placeholder="sk-ant-api03-..." />
-        {msg && <p style={{ fontSize:12, color: msg.startsWith("✓")?"#22c55e":"#ef4444", marginTop:8 }}>{msg}</p>}
+        {msg && <p style={{ fontSize:12, color: msg.startsWith("✓")?"var(--success)":"var(--danger)", marginTop:8 }}>{msg}</p>}
         <Btn onClick={saveKey} disabled={testing||!newKey.trim()} style={{ marginTop:10 }}>
           {testing ? <span style={{ display:"flex",gap:8,alignItems:"center" }}><Spinner size={14}/>Testing…</span> : "Update API Key"}
         </Btn>
-        <p style={{ fontSize:11,color:"#21262d",marginTop:10 }}>Get your key at <a href="https://console.anthropic.com" target="_blank" rel="noreferrer" style={{ color:"#3b82f6" }}>console.anthropic.com</a></p>
+        <p style={{ fontSize:11,color:"var(--text-5)",marginTop:10 }}>Get your key at <a href="https://console.anthropic.com" target="_blank" rel="noreferrer" style={{ color:"var(--accent)" }}>console.anthropic.com</a></p>
       </Card>
 
       <Card>
         <Label>Data & Sessions</Label>
-        <p style={{ fontSize:12,color:"#64748b",marginBottom:14 }}>{sessionCount} sessions stored locally on this device using localStorage.</p>
+        <p style={{ fontSize:12,color:"var(--text-3)",marginBottom:14 }}>{sessionCount} sessions saved to your account in the cloud.</p>
         <div style={{ display:"flex",gap:10 }}>
           <Btn variant="danger" onClick={() => { if(confirm(`Delete all ${sessionCount} sessions? This cannot be undone.`)) { onClearSessions(); } }}>
             🗑 Clear All Sessions
@@ -1468,15 +2466,274 @@ function SettingsView({ apiKey, onChangeKey, onClearSessions, sessionCount }) {
         </div>
       </Card>
 
+      {legacyCount > 0 && (
+        <Card accent="#d97706">
+          <Label color="var(--warning)">Import Older Sessions</Label>
+          <p style={{ fontSize:12,color:"var(--text-3)",marginBottom:14 }}>
+            Found {legacyCount} session{legacyCount!==1?"s":""} saved in this browser from before cloud sync was added. Import them into your account so they're available on any device.
+          </p>
+          <Btn disabled={importing} onClick={async () => {
+            setImporting(true);
+            await onImportLegacy();
+            setImporting(false);
+          }}>
+            {importing ? <span style={{ display:"flex",gap:8,alignItems:"center" }}><Spinner size={14}/>Importing…</span> : `⬆ Import ${legacyCount} Local Session${legacyCount!==1?"s":""}`}
+          </Btn>
+        </Card>
+      )}
+
       <Card>
         <Label>About ClassroomLens Pro</Label>
-        <div style={{ fontSize:12,color:"#64748b",lineHeight:1.8 }}>
+        <div style={{ fontSize:12,color:"var(--text-3)",lineHeight:1.8 }}>
           <p>Version 1.0.0 · Built for instructional coaches, administrators, and teachers.</p>
           <p style={{ marginTop:8 }}>Supports: Danielson (2022), Marzano 2.0, CEL 5D+, TNTP Core, TPEP (2023)</p>
-          <p style={{ marginTop:8 }}>Support & licensing: <a href="mailto:anthonykc@gmail.com" style={{ color:"#3b82f6" }}>anthonykc@gmail.com</a></p>
-          <p style={{ marginTop:8,color:"#334155" }}>© 2025 ClassroomLens Pro · All rights reserved</p>
+          <p style={{ marginTop:8 }}>Support & licensing: <a href="mailto:anthonykc@gmail.com" style={{ color:"var(--accent)" }}>anthonykc@gmail.com</a></p>
+          <p style={{ marginTop:8,color:"var(--text-5)" }}>© 2025 ClassroomLens Pro · All rights reserved</p>
         </div>
       </Card>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ORGANIZATION VIEW (individual → school plan upgrade, invites, roster)
+// ─────────────────────────────────────────────────────────────────────────────
+function OrganizationView({ user, org, school, onOrgChange }) {
+  const [schoolName, setSchoolName] = useState("");
+  const [joinCode, setJoinCode] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [members, setMembers] = useState([]);
+  const [membersLoading, setMembersLoading] = useState(false);
+  const [copied, setCopied] = useState("");
+
+  useEffect(() => {
+    if (!org) return;
+    let cancelled = false;
+    setMembersLoading(true);
+    orgApi.listTeamMembers(org.schoolId)
+      .then(rows => { if (!cancelled) setMembers(rows); })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setMembersLoading(false); });
+    return () => { cancelled = true; };
+  }, [org, school]);
+
+  const copy = (text, label) => {
+    navigator.clipboard?.writeText(text);
+    setCopied(label);
+    setTimeout(() => setCopied(""), 1800);
+  };
+
+  const upgrade = async () => {
+    if (!schoolName.trim()) { setErr("Enter a school name."); return; }
+    setErr(""); setBusy(true);
+    try {
+      await orgApi.createSchool(schoolName.trim());
+      await onOrgChange();
+    } catch (e) { setErr(e.message); }
+    setBusy(false);
+  };
+
+  const join = async () => {
+    if (!joinCode.trim()) { setErr("Enter an invite code."); return; }
+    setErr(""); setBusy(true);
+    try {
+      await orgApi.joinSchoolByCode(joinCode.trim().toUpperCase());
+      await onOrgChange();
+    } catch (e) { setErr(e.message); }
+    setBusy(false);
+  };
+
+  const regenerate = async () => {
+    setBusy(true); setErr("");
+    try {
+      await orgApi.regenerateInviteCode(org.schoolId);
+      await onOrgChange();
+    } catch (e) { setErr(e.message); }
+    setBusy(false);
+  };
+
+  const remove = async (userId) => {
+    if (!confirm("Remove this teacher from your school? Their existing observations stay on record.")) return;
+    try {
+      await orgApi.removeMember(userId);
+      setMembers(prev => prev.filter(m => m.userId !== userId));
+    } catch (e) { alert("Couldn't remove teacher: " + e.message); }
+  };
+
+  // ---- No school yet: individual plan ----
+  if (!org) {
+    return (
+      <div className="fade-up" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        <Card style={{ textAlign: "center", padding: "40px 32px" }}>
+          <Chip label="Individual Plan" color="var(--text-4)" size="md" />
+          <div style={{ fontSize: 19, fontWeight: 800, color: "var(--text)", marginTop: 14, marginBottom: 8 }}>Upgrade to the School Plan</div>
+          <p style={{ fontSize: 13, color: "var(--text-4)", maxWidth: 460, margin: "0 auto", lineHeight: 1.7 }}>
+            Create a school to invite your teaching staff, collect their observations under one roof, and see school-wide trends on your Dashboard as their principal.
+          </p>
+        </Card>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+          <Card>
+            <Label>Upgrade — Create a School</Label>
+            <p style={{ fontSize: 12, color: "var(--text-4)", marginBottom: 14, lineHeight: 1.6 }}>You'll become the school's principal and get an invite code to share with teachers.</p>
+            <TextInput label="School Name" value={schoolName} onChange={setSchoolName} placeholder="e.g. Lincoln Elementary" />
+            <Btn full style={{ marginTop: 12 }} onClick={upgrade} disabled={busy}>
+              {busy ? <span style={{ display:"flex",gap:8,alignItems:"center",justifyContent:"center" }}><Spinner size={14}/>Creating…</span> : "🏫 Upgrade to School Plan"}
+            </Btn>
+          </Card>
+
+          <Card>
+            <Label>Join an Existing School</Label>
+            <p style={{ fontSize: 12, color: "var(--text-4)", marginBottom: 14, lineHeight: 1.6 }}>Got an invite code from your principal? Enter it here to join as a teacher.</p>
+            <TextInput label="Invite Code" value={joinCode} onChange={v => setJoinCode(v.toUpperCase())} placeholder="e.g. A1B2C3D4" />
+            <Btn full variant="outline" style={{ marginTop: 12 }} onClick={join} disabled={busy}>
+              {busy ? <span style={{ display:"flex",gap:8,alignItems:"center",justifyContent:"center" }}><Spinner size={14}/>Joining…</span> : "Join School"}
+            </Btn>
+          </Card>
+        </div>
+
+        {err && <div style={{ background: "var(--danger-soft)", border: "1px solid #dc262622", borderRadius: 8, padding: "10px 14px", fontSize: 12, color: "var(--danger)" }}>{err}</div>}
+      </div>
+    );
+  }
+
+  const isPrincipal = org.role === "principal";
+  const inviteLink = school ? `${window.location.origin}${window.location.pathname}?join=${school.invite_code}` : "";
+
+  return (
+    <div className="fade-up" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <Card style={{ borderTop: "3px solid var(--accent)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 10 }}>
+          <div>
+            <Chip label="School Plan" color="var(--accent)" size="md" />
+            <div style={{ fontSize: 19, fontWeight: 800, color: "var(--text)", marginTop: 10 }}>{school?.name || "Your School"}</div>
+            <div style={{ fontSize: 12, color: "var(--text-4)", marginTop: 3 }}>You're a {isPrincipal ? "Principal" : "Teacher"} at this school</div>
+          </div>
+          <div style={{ width: 44, height: 44, background: "var(--accent-soft)", borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--accent)" }}>
+            <Icon name="building" size={22} />
+          </div>
+        </div>
+      </Card>
+
+      {isPrincipal && (
+        <Card>
+          <Label>Invite Teachers</Label>
+          <p style={{ fontSize: 12, color: "var(--text-4)", marginBottom: 14, lineHeight: 1.6 }}>
+            Share this link (or the code) with your teaching staff. Anyone who opens it, signs up or logs in, and confirms will join {school?.name} as a teacher.
+          </p>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <div style={{ flex: 1, minWidth: 220, background: "var(--surface-2)", border: "1px solid var(--border)", borderRadius: 7, padding: "9px 12px", fontSize: 12, color: "var(--text-2)", fontFamily: "'JetBrains Mono',monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {inviteLink}
+            </div>
+            <Btn variant="outline" onClick={() => copy(inviteLink, "link")}>{copied === "link" ? "✓ Copied" : "Copy Link"}</Btn>
+            <Btn variant="ghost" onClick={() => copy(school?.invite_code || "", "code")}>{copied === "code" ? "✓ Copied" : `Code: ${school?.invite_code}`}</Btn>
+            <Btn variant="ghost" onClick={regenerate} disabled={busy}>↻ Regenerate</Btn>
+          </div>
+        </Card>
+      )}
+
+      <Card>
+        <Label>Team {membersLoading ? "" : `(${members.length})`}</Label>
+        {membersLoading
+          ? <p style={{ fontSize: 12, color: "var(--text-5)" }}>Loading roster…</p>
+          : members.length === 0
+            ? <p style={{ fontSize: 12, color: "var(--text-5)" }}>No teachers have joined yet.</p>
+            : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {members.map(m => (
+                  <div key={m.userId} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "var(--surface-2)", borderRadius: 8, padding: "10px 12px", gap: 8, flexWrap: "wrap" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+                      <div style={{ width: 30, height: 30, borderRadius: "50%", background: "var(--accent-soft)", color: "var(--accent)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 800, flexShrink: 0 }}>
+                        {(m.fullName || m.email || "?").trim()[0]?.toUpperCase() || "?"}
+                      </div>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{m.fullName || m.email || "Unknown"}</div>
+                        <div style={{ fontSize: 11, color: "var(--text-5)" }}>{m.email}</div>
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>
+                      <Chip label={m.role} color={m.role === "principal" ? "var(--accent)" : "var(--text-4)"} />
+                      {isPrincipal && m.userId !== user.id && (
+                        <Btn size="sm" variant="danger" onClick={() => remove(m.userId)}>Remove</Btn>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+      </Card>
+
+      {err && <div style={{ background: "var(--danger-soft)", border: "1px solid #dc262622", borderRadius: 8, padding: "10px 14px", fontSize: 12, color: "var(--danger)" }}>{err}</div>}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// JOIN-BY-LINK CONFIRMATION SCREEN
+// ─────────────────────────────────────────────────────────────────────────────
+function JoinSchoolScreen({ code, user, onSignOut, onJoined, onSkip }) {
+  const [schoolName, setSchoolName] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [joining, setJoining] = useState(false);
+  const [err, setErr] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    orgApi.previewSchoolByCode(code)
+      .then(name => { if (!cancelled) setSchoolName(name); })
+      .catch(e => { if (!cancelled) setErr(e.message); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [code]);
+
+  const join = async () => {
+    setJoining(true); setErr("");
+    try {
+      await orgApi.joinSchoolByCode(code);
+      onJoined();
+    } catch (e) {
+      setErr(e.message);
+      setJoining(false);
+    }
+  };
+
+  return (
+    <div style={{ minHeight: "100vh", background: "var(--bg)", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+      <div style={{ maxWidth: 440, width: "100%" }}>
+        <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 10, marginBottom: 20 }}>
+          <div style={{ fontSize: 11, color: "var(--text-4)", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 6, padding: "3px 10px" }}>
+            Signed in as <strong style={{ color: "var(--text-2)" }}>{user.email}</strong>
+          </div>
+          <Btn size="sm" variant="ghost" onClick={onSignOut}>Sign Out</Btn>
+        </div>
+        <Card style={{ boxShadow: "var(--shadow-lg)", textAlign: "center", padding: "36px 30px" }}>
+          <div style={{ width: 48, height: 48, background: "var(--accent-soft)", borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 18px", color: "var(--accent)" }}>
+            <Icon name="building" size={22} />
+          </div>
+          {loading ? (
+            <div style={{ display: "flex", justifyContent: "center" }}><Spinner /></div>
+          ) : schoolName ? (
+            <>
+              <div style={{ fontSize: 17, fontWeight: 800, color: "var(--text)", marginBottom: 8 }}>Join {schoolName}?</div>
+              <p style={{ fontSize: 13, color: "var(--text-4)", lineHeight: 1.7, marginBottom: 22 }}>
+                You've been invited to join <strong style={{ color: "var(--text-2)" }}>{schoolName}</strong> as a teacher. Your existing sessions stay yours either way.
+              </p>
+              {err && <p style={{ fontSize: 12, color: "var(--danger)", marginBottom: 12 }}>{err}</p>}
+              <Btn full size="lg" onClick={join} disabled={joining} style={{ marginBottom: 10 }}>
+                {joining ? <span style={{ display:"flex",gap:8,alignItems:"center",justifyContent:"center" }}><Spinner size={14}/>Joining…</span> : `Join ${schoolName} →`}
+              </Btn>
+              <Btn full variant="ghost" onClick={onSkip} disabled={joining}>Not now</Btn>
+            </>
+          ) : (
+            <>
+              <div style={{ fontSize: 17, fontWeight: 800, color: "var(--text)", marginBottom: 8 }}>Invalid invite link</div>
+              <p style={{ fontSize: 13, color: "var(--text-4)", lineHeight: 1.7, marginBottom: 22 }}>This invite code doesn't match a school. Ask your principal for a fresh link.</p>
+              <Btn full onClick={onSkip}>Continue to ClassroomLens Pro →</Btn>
+            </>
+          )}
+        </Card>
+      </div>
     </div>
   );
 }
@@ -1485,94 +2742,289 @@ function SettingsView({ apiKey, onChangeKey, onClearSessions, sessionCount }) {
 // ROOT APP
 // ─────────────────────────────────────────────────────────────────────────────
 const TABS = [
-  { id:"record",   icon:"⏺",  label:"Observe"  },
-  { id:"analysis", icon:"⚡",  label:"Analysis" },
-  { id:"growth",   icon:"🌱",  label:"Growth"   },
-  { id:"coaching", icon:"💬",  label:"Coaching" },
-  { id:"report",   icon:"📄",  label:"Reports"  },
-  { id:"admin",    icon:"🏫",  label:"Admin"    },
-  { id:"sessions", icon:"📁",  label:"Sessions" },
-  { id:"settings", icon:"⚙️",  label:"Settings" },
+  { id:"dashboard",     icon:"dashboard",  label:"Dashboard",              group:"Overview" },
+  { id:"record",        icon:"record",     label:"Observe",                group:"Observation" },
+  { id:"analysis",      icon:"analysis",   label:"Analysis",               group:"Observation" },
+  { id:"growth",        icon:"growth",     label:"Growth Plan",            group:"Observation" },
+  { id:"coaching",      icon:"coaching",   label:"Coaching",               group:"Observation" },
+  { id:"report",        icon:"report",     label:"Reports",                group:"Observation" },
+  { id:"iep",           icon:"iep",        label:"IEP Meeting Analysis",   group:"Tools" },
+  { id:"plc",           icon:"plc",        label:"PLC Meeting Analyzer",   group:"Tools" },
+  { id:"lessonplan",    icon:"lessonplan", label:"Lesson Plan Analyzer",   group:"Tools" },
+  { id:"sessions",      icon:"sessions",   label:"Sessions",               group:"Library" },
+  { id:"organization",  icon:"team",       label:"Organization",           group:"Account" },
+  { id:"settings",      icon:"settings",   label:"Settings",               group:"Account" },
 ];
+const TAB_GROUPS = ["Overview", "Observation", "Tools", "Library", "Account"];
+const PAGE_META = {
+  dashboard: { title: "Dashboard", subtitle: "Your observation trends at a glance" },
+  record:    { title: "New Observation", subtitle: "Record or paste a transcript to generate an AI analysis" },
+  analysis:  { title: "Analysis", subtitle: "AI-scored breakdown of the active observation" },
+  growth:    { title: "Growth Plan", subtitle: "Actionable next steps from the active observation" },
+  coaching:  { title: "Coaching Conference", subtitle: "Pre- and post-observation conversation support" },
+  report:    { title: "Reports", subtitle: "Generate formal, teacher-facing, or administrative write-ups" },
+  iep:       { title: "IEP Meeting Analysis", subtitle: "AI-assisted support for special education case managers — nothing is saved" },
+  plc:       { title: "PLC Meeting Analyzer", subtitle: "AI-assisted analysis of your team's collaborative meeting — nothing is saved" },
+  lessonplan:{ title: "Lesson Plan Analyzer", subtitle: "Framework-mapped feedback on your lesson plan — nothing is saved" },
+  sessions:  { title: "Sessions", subtitle: "Every observation saved to your account" },
+  organization: { title: "Organization", subtitle: "Manage your school, plan, and team" },
+  settings:  { title: "Settings", subtitle: "API key, data, and account preferences" },
+};
 
 export default function App() {
+  const { user, loading: authLoading, signOut } = useAuth();
   const [apiKey, setApiKey] = useState(() => {
     const env = import.meta.env?.VITE_ANTHROPIC_API_KEY;
     if (env && env !== "sk-ant-your-key-goes-here") return env;
     return localStorage.getItem(APIKEY_STORAGE) || "";
   });
-  const [tab, setTab] = useState("record");
-  const [sessions, setSessions] = useState(() => loadSessions());
+  const [tab, setTab] = useState("dashboard");
+  const [sessions, setSessions] = useState([]);
+  const [sessionsLoading, setSessionsLoading] = useState(true);
+  const [sessionsError, setSessionsError] = useState("");
   const [activeSession, setActiveSession] = useState(null);
+  const [legacyCount, setLegacyCount] = useState(() => loadLegacySessions().length);
 
-  // Persist sessions
-  useEffect(() => { saveSessions(sessions); }, [sessions]);
+  // org === undefined -> not resolved yet, null -> individual plan, object -> {schoolId, role}
+  const [org, setOrg] = useState(undefined);
+  const [school, setSchool] = useState(null);
+  const [joinCode] = useState(() => new URLSearchParams(window.location.search).get("join"));
+  const [joinHandled, setJoinHandled] = useState(false);
 
-  const handleAnalyze = useCallback((session) => {
-    setSessions(prev => { const updated = [session, ...prev]; return updated; });
-    setActiveSession(session);
+  const refreshOrg = useCallback(async () => {
+    if (!user) return;
+    const m = await orgApi.getMyMembership(user.id);
+    setOrg(m);
+    if (m) setSchool(await orgApi.getSchool(m.schoolId));
+    else setSchool(null);
+  }, [user]);
+
+  // Load this user's school membership whenever they log in.
+  useEffect(() => {
+    if (!user) { setOrg(undefined); setSchool(null); return; }
+    let cancelled = false;
+    orgApi.getMyMembership(user.id).then(async m => {
+      if (cancelled) return;
+      setOrg(m);
+      if (m) {
+        const s = await orgApi.getSchool(m.schoolId);
+        if (!cancelled) setSchool(s);
+      }
+    }).catch(() => { if (!cancelled) setOrg(null); });
+    return () => { cancelled = true; };
+  }, [user]);
+
+  // Load sessions once we know whether this user is a principal (school-wide) or not (own only).
+  useEffect(() => {
+    if (!user || org === undefined) return;
+    let cancelled = false;
+    setSessionsLoading(true);
+    setSessionsError("");
+    const fetcher = org?.role === "principal" && org.schoolId
+      ? sessionsApi.listSchoolSessions(org.schoolId)
+      : sessionsApi.listSessions(user.id);
+    fetcher
+      .then(rows => { if (!cancelled) setSessions(rows); })
+      .catch(e => { if (!cancelled) setSessionsError(e.message); })
+      .finally(() => { if (!cancelled) setSessionsLoading(false); });
+    return () => { cancelled = true; };
+  }, [user, org]);
+
+  const handleAnalyze = useCallback(async (draft) => {
+    const saved = await sessionsApi.createSession(draft, user.id, org?.schoolId);
+    setSessions(prev => [saved, ...prev]);
+    setActiveSession(saved);
     setTab("analysis");
-  }, []);
+  }, [user, org]);
 
-  const deleteSession = (id) => {
-    setSessions(prev => prev.filter(s => s.id !== id));
-    if (activeSession?.id === id) setActiveSession(null);
+  const deleteSession = async (id) => {
+    try {
+      await sessionsApi.deleteSession(id, user.id);
+      setSessions(prev => prev.filter(s => s.id !== id));
+      if (activeSession?.id === id) setActiveSession(null);
+    } catch (e) {
+      alert("Failed to delete session: " + e.message);
+    }
   };
 
-  const clearSessions = () => { setSessions([]); setActiveSession(null); };
+  const clearSessions = async () => {
+    try {
+      await sessionsApi.deleteAllSessions(user.id);
+      setSessions([]);
+      setActiveSession(null);
+    } catch (e) {
+      alert("Failed to clear sessions: " + e.message);
+    }
+  };
+
+  const importLegacySessions = async () => {
+    try {
+      const imported = await sessionsApi.importLocalSessions(loadLegacySessions(), user.id);
+      setSessions(prev => [...imported, ...prev]);
+      clearLegacySessions();
+      setLegacyCount(0);
+    } catch (e) {
+      alert("Failed to import local sessions: " + e.message);
+    }
+  };
+
+  if (authLoading) return (
+    <>
+      <style>{css}</style>
+      <div style={{ minHeight: "100vh", background: "var(--bg)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <Spinner size={28} />
+      </div>
+    </>
+  );
+
+  if (!user) return (
+    <>
+      <style>{css}</style>
+      <AuthScreen />
+    </>
+  );
 
   if (!apiKey) return (
     <>
       <style>{css}</style>
-      <ApiKeySetup onSave={setApiKey} />
+      <ApiKeySetup onSave={setApiKey} user={user} onSignOut={signOut} />
     </>
   );
 
+  // A user who already belongs to a school just silently drops the ?join= param.
+  if (joinCode && org) {
+    window.history.replaceState({}, "", window.location.pathname);
+  }
+
+  if (joinCode && !joinHandled && org === undefined) return (
+    <>
+      <style>{css}</style>
+      <div style={{ minHeight: "100vh", background: "var(--bg)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <Spinner size={28} />
+      </div>
+    </>
+  );
+
+  if (joinCode && !joinHandled && org === null) return (
+    <>
+      <style>{css}</style>
+      <JoinSchoolScreen
+        code={joinCode}
+        user={user}
+        onSignOut={signOut}
+        onJoined={async () => {
+          window.history.replaceState({}, "", window.location.pathname);
+          await refreshOrg();
+          setJoinHandled(true);
+        }}
+        onSkip={() => {
+          window.history.replaceState({}, "", window.location.pathname);
+          setJoinHandled(true);
+        }}
+      />
+    </>
+  );
+
+  const meta = tab === "dashboard"
+    ? { title: "Dashboard", subtitle: org?.role === "principal" ? `School-wide observation trends across ${school?.name || "your school"}` : "Your observation trends at a glance" }
+    : (PAGE_META[tab] || {});
+  const initial = (user.email || "?").trim()[0]?.toUpperCase() || "?";
+
   return (
-    <div style={{ minHeight: "100vh", background: "#010409" }}>
+    <div style={{ minHeight: "100vh", background: "var(--bg)", display: "flex" }}>
       <style>{css}</style>
 
-      {/* Top bar */}
-      <div style={{ background: "#0d1117", borderBottom: "1px solid #21262d", height: 52, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 20px", position: "sticky", top: 0, zIndex: 100 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{ width: 30, height: 30, background: "linear-gradient(135deg,#1d4ed8,#7c3aed)", borderRadius: 7, display:"flex",alignItems:"center",justifyContent:"center",fontSize:15 }}>🎓</div>
-          <div>
-            <div style={{ fontWeight: 800, fontSize: 13, color: "#e6edf3", letterSpacing: "-0.02em" }}>ClassroomLens <span style={{ color:"#3b82f6" }}>Pro</span></div>
-            <div style={{ fontSize: 9, color: "#21262d", letterSpacing: "0.1em" }}>AI OBSERVATION PLATFORM</div>
+      {/* Sidebar */}
+      <aside style={{ width: 240, flexShrink: 0, background: "var(--sidebar-bg)", display: "flex", flexDirection: "column", position: "sticky", top: 0, height: "100vh" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "20px 18px 16px" }}>
+          <div style={{ width: 32, height: 32, background: "linear-gradient(135deg,#4f46e5,#4338ca)", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Icon name="lens" size={17} /></div>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontWeight: 800, fontSize: 13, color: "#fff", letterSpacing: "-0.02em", whiteSpace: "nowrap" }}>ClassroomLens <span style={{ color: "#818cf8" }}>Pro</span></div>
+            <div style={{ fontSize: 9, color: "var(--sidebar-text)", letterSpacing: "0.1em" }}>OBSERVATION PLATFORM</div>
           </div>
         </div>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+
+        <nav style={{ flex: 1, overflowY: "auto", padding: "8px 12px" }}>
+          {TAB_GROUPS.map(group => (
+            <div key={group} style={{ marginBottom: 18 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: "#475569", letterSpacing: "0.1em", textTransform: "uppercase", padding: "0 10px", marginBottom: 6 }}>{group}</div>
+              {TABS.filter(t => t.group === group).map(t => {
+                const active = tab === t.id;
+                return (
+                  <button key={t.id} onClick={() => setTab(t.id)}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 10, width: "100%", textAlign: "left",
+                      background: active ? "var(--sidebar-bg-2)" : "transparent",
+                      border: "none", borderLeft: `2px solid ${active ? "#818cf8" : "transparent"}`,
+                      color: active ? "#fff" : "var(--sidebar-text)",
+                      padding: "8px 10px 8px 8px", fontSize: 13, fontWeight: active ? 700 : 600, cursor: "pointer",
+                      borderRadius: 7, marginBottom: 2, fontFamily: "inherit", transition: "background .15s, color .15s",
+                    }}
+                    onMouseEnter={e => { if (!active) { e.currentTarget.style.background = "var(--sidebar-bg-2)"; e.currentTarget.style.color = "#e2e8f0"; } }}
+                    onMouseLeave={e => { if (!active) { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--sidebar-text)"; } }}>
+                    <Icon name={t.icon} size={16} />
+                    {t.label}
+                  </button>
+                );
+              })}
+            </div>
+          ))}
+        </nav>
+
+        <div style={{ borderTop: "1px solid var(--sidebar-border)", padding: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "8px 6px" }}>
+            <div style={{ width: 28, height: 28, borderRadius: "50%", background: "var(--sidebar-bg-2)", color: "#c7d2fe", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 800, flexShrink: 0 }}>{initial}</div>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{ fontSize: 11, color: "#e2e8f0", fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{user.email}</div>
+              <div style={{ fontSize: 10, color: "var(--sidebar-text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                {org ? `${school?.name || "School"} · ${org.role === "principal" ? "Principal" : "Teacher"}` : `${sessions.length} session${sessions.length !== 1 ? "s" : ""} saved`}
+              </div>
+            </div>
+            <button onClick={signOut} title="Sign out"
+              style={{ background: "transparent", border: "none", color: "var(--sidebar-text)", cursor: "pointer", padding: 6, borderRadius: 6, display: "flex" }}
+              onMouseEnter={e => { e.currentTarget.style.color = "#fca5a5"; }}
+              onMouseLeave={e => { e.currentTarget.style.color = "var(--sidebar-text)"; }}>
+              <Icon name="logout" size={15} />
+            </button>
+          </div>
+        </div>
+      </aside>
+
+      {/* Main column */}
+      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
+        {/* Page header */}
+        <div style={{ background: "var(--surface)", borderBottom: "1px solid var(--border)", padding: "18px 32px", position: "sticky", top: 0, zIndex: 10, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
+          <div>
+            <div style={{ fontSize: 19, fontWeight: 800, color: "var(--text)", letterSpacing: "-0.01em" }}>{meta.title}</div>
+            <div style={{ fontSize: 12, color: "var(--text-4)", marginTop: 2 }}>{meta.subtitle}</div>
+          </div>
           {activeSession && (
-            <div style={{ fontSize: 11, color: "#475569", background: "#161b22", border: "1px solid #21262d", borderRadius: 6, padding: "3px 10px" }}>
-              Active: <strong style={{ color:"#94a3b8" }}>{activeSession.meta.teacher || "Session"}</strong>
+            <div style={{ fontSize: 11, color: "var(--text-3)", background: "var(--accent-soft)", border: "1px solid #4f46e522", borderRadius: 7, padding: "5px 12px" }}>
+              Active session: <strong style={{ color: "var(--accent)" }}>{activeSession.meta.teacher || "Untitled"}</strong>
             </div>
           )}
-          <Chip label={`${sessions.length} saved`} color="#334155" />
         </div>
-      </div>
 
-      {/* Tab nav */}
-      <div style={{ background: "#0d1117", borderBottom: "1px solid #21262d", display: "flex", padding: "0 20px", overflowX: "auto" }}>
-        {TABS.map(t => (
-          <button key={t.id} onClick={() => setTab(t.id)}
-            style={{ background: "transparent", border: "none", borderBottom: `2px solid ${tab===t.id?"#3b82f6":"transparent"}`,
-              color: tab===t.id?"#e6edf3":"#475569", padding: "10px 15px", fontSize: 12, fontWeight: 700, cursor: "pointer",
-              whiteSpace: "nowrap", fontFamily: "inherit", transition: "all .15s", borderRadius: "6px 6px 0 0" }}>
-            <span style={{ marginRight: 5 }}>{t.icon}</span>{t.label}
-          </button>
-        ))}
-      </div>
-
-      {/* Content */}
-      <div style={{ maxWidth: 960, margin: "0 auto", padding: "24px 20px 80px" }}>
-        {tab === "record"   && <RecordView apiKey={apiKey} onAnalyze={handleAnalyze} />}
-        {tab === "analysis" && <AnalysisView session={activeSession} apiKey={apiKey} />}
-        {tab === "growth"   && <GrowthPlanView session={activeSession} />}
-        {tab === "coaching" && <CoachingView session={activeSession} apiKey={apiKey} />}
-        {tab === "report"   && <ReportView session={activeSession} apiKey={apiKey} />}
-        {tab === "admin"    && <AdminDashboard sessions={sessions} />}
-        {tab === "sessions" && <SessionsList sessions={sessions} onSelect={s => { setActiveSession(s); setTab("analysis"); }} onDelete={deleteSession} />}
-        {tab === "settings" && <SettingsView apiKey={apiKey} onChangeKey={setApiKey} onClearSessions={clearSessions} sessionCount={sessions.length} />}
+        {/* Content */}
+        <div style={{ flex: 1, maxWidth: 1080, width: "100%", margin: "0 auto", padding: "28px 32px 80px" }}>
+          {sessionsError && (
+            <div style={{ background: "var(--danger-soft)", border: "1px solid #dc262622", borderRadius: 8, padding: "10px 14px", fontSize: 12, color: "var(--danger)", marginBottom: 16 }}>
+              Couldn't load your sessions from the cloud: {sessionsError}
+            </div>
+          )}
+          {tab === "dashboard" && <DashboardView sessions={sessions} onSelect={s => { setActiveSession(s); setTab("analysis"); }} onNew={() => setTab("record")} />}
+          {tab === "record"    && <RecordView apiKey={apiKey} onAnalyze={handleAnalyze} />}
+          {tab === "analysis"  && <AnalysisView session={activeSession} apiKey={apiKey} />}
+          {tab === "growth"    && <GrowthPlanView session={activeSession} />}
+          {tab === "coaching"  && <CoachingView session={activeSession} apiKey={apiKey} />}
+          {tab === "report"    && <ReportView session={activeSession} apiKey={apiKey} />}
+          {tab === "iep"        && <IEPView apiKey={apiKey} />}
+          {tab === "plc"        && <PLCView apiKey={apiKey} />}
+          {tab === "lessonplan" && <LessonPlanView apiKey={apiKey} />}
+          {tab === "sessions"  && <SessionsList sessions={sessions} loading={sessionsLoading} currentUserId={user.id} onSelect={s => { setActiveSession(s); setTab("analysis"); }} onDelete={deleteSession} />}
+          {tab === "organization" && <OrganizationView user={user} org={org} school={school} onOrgChange={refreshOrg} />}
+          {tab === "settings"  && <SettingsView apiKey={apiKey} onChangeKey={setApiKey} onClearSessions={clearSessions} sessionCount={sessions.length} legacyCount={legacyCount} onImportLegacy={importLegacySessions} />}
+        </div>
       </div>
     </div>
   );
