@@ -680,6 +680,36 @@ function ApiKeySetup({ onSave, user, onSignOut }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // RECORD / OBSERVE VIEW
 // ─────────────────────────────────────────────────────────────────────────────
+const SPEAKER_TAGS = ["Teacher", "Student A", "Student B", "Whole Class"];
+const NOTE_CATEGORIES = ["Context", "What I Noticed", "Questions to Ask", "Student Behaviors"];
+const QUICK_NOTES = [
+  { label: "Transition", category: "What I Noticed" },
+  { label: "Off-task behavior", category: "Student Behaviors" },
+  { label: "Strong questioning", category: "What I Noticed" },
+  { label: "Student confusion", category: "Student Behaviors" },
+];
+const TIMESTAMP_MARKER_SECONDS = 120;
+
+function mergeTranscriptAndNotes(entries, notes) {
+  const items = [
+    ...entries.map(e => ({ time: e.time, kind: "t", speaker: e.speaker, text: e.text })),
+    ...notes.map(n => ({ time: n.time, kind: "n", category: n.category, text: n.text })),
+  ].sort((a, b) => a.time - b.time);
+  const lines = [];
+  let lastMarker = -1;
+  for (const item of items) {
+    const marker = Math.floor(item.time / TIMESTAMP_MARKER_SECONDS);
+    if (marker > lastMarker) {
+      lines.push(`— ${fmtTime(marker * TIMESTAMP_MARKER_SECONDS)} —`);
+      lastMarker = marker;
+    }
+    lines.push(item.kind === "t"
+      ? `[${fmtTime(item.time)}] ${item.speaker}: ${item.text}`
+      : `[${fmtTime(item.time)}] OBSERVER NOTE (${item.category}): ${item.text}`);
+  }
+  return lines.join("\n");
+}
+
 function RecordView({ apiKey, onAnalyze }) {
   const [meta, setMeta] = useState({ teacher: "", grade: "", subject: "", date: new Date().toISOString().split("T")[0], observer: "", school: "" });
   const [framework, setFramework] = useState("danielson");
@@ -691,14 +721,31 @@ function RecordView({ apiKey, onAnalyze }) {
   const [audioLevel, setAudioLevel] = useState(0.5);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
+
+  // Split-screen live capture: transcript segments and observer notes are logged
+  // separately with timestamps, then interleaved chronologically when recording stops.
+  const [speakerTag, setSpeakerTag] = useState(SPEAKER_TAGS[0]);
+  const [transcriptEntries, setTranscriptEntries] = useState([]);
+  const [interimText, setInterimText] = useState("");
+  const [notesEntries, setNotesEntries] = useState([]);
+  const [noteDraft, setNoteDraft] = useState("");
+  const [activeCategory, setActiveCategory] = useState(NOTE_CATEGORIES[1]);
+
   const recognitionRef = useRef(null);
   const timerRef = useRef(null);
   const analyzerRef = useRef(null);
   const animRef = useRef(null);
   const streamRef = useRef(null);
+  const recTimeRef = useRef(0);
+  const speakerTagRef = useRef(speakerTag);
+  const transcriptScrollRef = useRef(null);
+  const notesScrollRef = useRef(null);
 
   const setMf = (k, v) => setMeta(p => ({ ...p, [k]: v }));
   const fw = FRAMEWORKS[framework];
+
+  useEffect(() => { recTimeRef.current = recTime; }, [recTime]);
+  useEffect(() => { speakerTagRef.current = speakerTag; }, [speakerTag]);
 
   useEffect(() => {
     if (isRecording && !isPaused) {
@@ -714,8 +761,23 @@ function RecordView({ apiKey, onAnalyze }) {
     recognitionRef.current?.stop();
   }, []);
 
+  useEffect(() => {
+    if (transcriptScrollRef.current) transcriptScrollRef.current.scrollTop = transcriptScrollRef.current.scrollHeight;
+  }, [transcriptEntries, interimText]);
+
+  useEffect(() => {
+    if (notesScrollRef.current) notesScrollRef.current.scrollTop = notesScrollRef.current.scrollHeight;
+  }, [notesEntries]);
+
+  const addNote = (text, category) => {
+    const t = text.trim();
+    if (!t) return;
+    setNotesEntries(prev => [...prev, { time: recTimeRef.current, category, text: t }]);
+  };
+
   const startRecording = async () => {
-    setTranscript(""); setRecTime(0); setErr("");
+    setTranscript(""); setTranscriptEntries([]); setNotesEntries([]); setInterimText(""); setNoteDraft("");
+    setRecTime(0); setErr("");
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
@@ -739,20 +801,25 @@ function RecordView({ apiKey, onAnalyze }) {
     if (SR) {
       const r = new SR();
       r.continuous = true; r.interimResults = true; r.lang = "en-US";
-      let final = "";
       r.onresult = e => {
         let interim = "";
         for (let i = e.resultIndex; i < e.results.length; i++) {
-          if (e.results[i].isFinal) final += e.results[i][0].transcript + " ";
-          else interim = e.results[i][0].transcript;
+          const chunk = e.results[i][0].transcript;
+          if (e.results[i].isFinal) {
+            if (chunk.trim()) {
+              setTranscriptEntries(prev => [...prev, { time: recTimeRef.current, speaker: speakerTagRef.current, text: chunk.trim() }]);
+            }
+          } else {
+            interim = chunk;
+          }
         }
-        setTranscript(final + interim);
+        setInterimText(interim);
       };
       r.onerror = e => { if (e.error !== "aborted") setErr("Mic error: " + e.error); };
       r.start();
       recognitionRef.current = r;
     } else {
-      setErr("Live transcription requires Chrome or Edge. Use Paste mode.");
+      setErr("Live transcription requires Chrome or Edge. You can still add observer notes below, or switch to Paste mode.");
     }
     setIsRecording(true); setIsPaused(false);
   };
@@ -763,6 +830,9 @@ function RecordView({ apiKey, onAnalyze }) {
     recognitionRef.current?.stop();
     streamRef.current?.getTracks().forEach(t => t.stop());
     setAudioLevel(0);
+    setInterimText("");
+    const merged = mergeTranscriptAndNotes(transcriptEntries, notesEntries);
+    if (merged) setTranscript(merged);
   };
 
   const togglePause = () => {
@@ -863,14 +933,100 @@ function RecordView({ apiKey, onAnalyze }) {
                     </>}
               </div>
             </div>
-            {transcript && (
-              <div style={{ marginTop: 14, background: "var(--surface-2)", borderRadius: 8, padding: 14, maxHeight: 220, overflowY: "auto" }}>
-                <Label>Live Transcript</Label>
-                <p style={{ fontSize: 12, color: "var(--text-2)", lineHeight: 1.85, whiteSpace: "pre-wrap" }}>{transcript}</p>
+            {isRecording ? (
+              <div style={{ marginTop: 14, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+                {/* Left: live transcript panel */}
+                <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderTop: "3px solid var(--accent)", borderRadius: 10, padding: 14, display: "flex", flexDirection: "column" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
+                    <Label>Live Transcript</Label>
+                    <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+                      {SPEAKER_TAGS.map(tag => (
+                        <button key={tag} onClick={() => setSpeakerTag(tag)}
+                          style={{ background: speakerTag===tag ? "var(--accent-soft)" : "var(--surface-2)", border: `1px solid ${speakerTag===tag ? "var(--accent)" : "var(--border-strong)"}`,
+                            color: speakerTag===tag ? "var(--accent)" : "var(--text-4)", borderRadius: 5, padding: "3px 8px", fontSize: 10, fontWeight: 700, cursor: "pointer" }}>
+                          {tag}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div ref={transcriptScrollRef} style={{ flex: 1, minHeight: 260, maxHeight: 340, overflowY: "auto", background: "var(--surface-2)", borderRadius: 8, padding: 12 }}>
+                    {transcriptEntries.length === 0 && !interimText && (
+                      <p style={{ fontSize: 12, color: "var(--text-5)", fontStyle: "italic" }}>Listening… transcript will appear here as the lesson is recorded.</p>
+                    )}
+                    {transcriptEntries.map((e, i) => {
+                      const marker = Math.floor(e.time / TIMESTAMP_MARKER_SECONDS);
+                      const prevMarker = i > 0 ? Math.floor(transcriptEntries[i-1].time / TIMESTAMP_MARKER_SECONDS) : -1;
+                      return (
+                        <div key={i}>
+                          {marker > prevMarker && (
+                            <div style={{ textAlign: "center", fontSize: 10, color: "var(--text-faint)", fontWeight: 700, letterSpacing: "0.08em", margin: "10px 0" }}>— {fmtTime(marker * TIMESTAMP_MARKER_SECONDS)} —</div>
+                          )}
+                          <div style={{ fontSize: 12, color: "var(--text-2)", lineHeight: 1.7, marginBottom: 8 }}>
+                            <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 10, color: "var(--text-faint)", marginRight: 6 }}>{fmtTime(e.time)}</span>
+                            <strong style={{ color: "var(--text)" }}>{e.speaker}:</strong> {e.text}
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {interimText && (
+                      <div style={{ fontSize: 12, color: "var(--text-5)", fontStyle: "italic", lineHeight: 1.7 }}>{speakerTag}: {interimText}…</div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Right: observer notes panel */}
+                <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderTop: "3px solid var(--warning)", borderRadius: 10, padding: 14, display: "flex", flexDirection: "column" }}>
+                  <Label>Observer Notes</Label>
+                  <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginBottom: 8 }}>
+                    {NOTE_CATEGORIES.map(cat => (
+                      <button key={cat} onClick={() => setActiveCategory(cat)}
+                        style={{ background: activeCategory===cat ? "var(--warning-soft)" : "var(--surface-2)", border: `1px solid ${activeCategory===cat ? "var(--warning)" : "var(--border-strong)"}`,
+                          color: activeCategory===cat ? "var(--warning)" : "var(--text-4)", borderRadius: 5, padding: "3px 8px", fontSize: 10, fontWeight: 700, cursor: "pointer" }}>
+                        {cat}
+                      </button>
+                    ))}
+                  </div>
+                  <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginBottom: 10 }}>
+                    {QUICK_NOTES.map(qn => (
+                      <button key={qn.label} onClick={() => addNote(qn.label, qn.category)}
+                        style={{ background: "var(--surface-2)", border: "1px dashed var(--border-strong)", color: "var(--text-3)", borderRadius: 6, padding: "4px 9px", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>
+                        + {qn.label}
+                      </button>
+                    ))}
+                  </div>
+                  <div ref={notesScrollRef} style={{ flex: 1, minHeight: 180, maxHeight: 250, overflowY: "auto", background: "var(--surface-2)", borderRadius: 8, padding: 12, marginBottom: 10 }}>
+                    {notesEntries.length === 0 && (
+                      <p style={{ fontSize: 12, color: "var(--text-5)", fontStyle: "italic" }}>Notes you add will appear here, timestamped to when you added them.</p>
+                    )}
+                    {notesEntries.map((n, i) => (
+                      <div key={i} style={{ marginBottom: 8, paddingBottom: 8, borderBottom: i < notesEntries.length-1 ? "1px solid var(--border)" : "none" }}>
+                        <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 3 }}>
+                          <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 10, color: "var(--text-faint)" }}>{fmtTime(n.time)}</span>
+                          <Chip label={n.category} color="var(--warning)" />
+                        </div>
+                        <div style={{ fontSize: 12, color: "var(--text-2)", lineHeight: 1.6 }}>{n.text}</div>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <input value={noteDraft} onChange={e => setNoteDraft(e.target.value)}
+                      onKeyDown={e => { if (e.key === "Enter") { addNote(noteDraft, activeCategory); setNoteDraft(""); } }}
+                      placeholder={`Add a note (${activeCategory})…`}
+                      style={{ flex: 1, background: "var(--surface)", border: "1px solid var(--border-strong)", borderRadius: 7, padding: "8px 11px", color: "var(--text)", fontSize: 12, outline: "none" }} />
+                    <Btn size="sm" onClick={() => { addNote(noteDraft, activeCategory); setNoteDraft(""); }}>Add</Btn>
+                  </div>
+                </div>
               </div>
-            )}
-            {!transcript && !isRecording && (
-              <p style={{ fontSize: 12, color: "var(--text-5)", textAlign: "center", marginTop: 8 }}>Press Start to begin recording. Transcript will appear live.</p>
+            ) : transcript ? (
+              <div style={{ marginTop: 14 }}>
+                <Label>Combined Transcript + Observer Notes</Label>
+                <p style={{ fontSize: 11, color: "var(--text-5)", marginBottom: 8 }}>Transcript and your notes, interleaved chronologically. Review and edit before analyzing.</p>
+                <textarea value={transcript} onChange={e => setTranscript(e.target.value)} rows={14}
+                  style={{ width: "100%", background: "var(--surface-2)", border: "1px solid var(--border)", borderRadius: 9, padding: 14, color: "var(--text)", fontSize: 13, lineHeight: 1.85, outline: "none" }} />
+                <div style={{ fontSize: 11, color: "var(--text-5)", marginTop: 6, textAlign: "right" }}>{transcript.split(" ").filter(Boolean).length} words</div>
+              </div>
+            ) : (
+              <p style={{ fontSize: 12, color: "var(--text-5)", textAlign: "center", marginTop: 8 }}>Press Start to begin recording. Transcript and notes will appear live, side by side.</p>
             )}
           </div>
         ) : (
