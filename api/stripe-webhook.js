@@ -110,12 +110,18 @@ export default async function handler(req, res) {
 
   // TEMP DIAGNOSTIC — records the literal event.type Stripe sent for every
   // event that passes signature verification, regardless of whether the
-  // switch below has a matching case. This settles whether
-  // "checkout.session.completed" handling is being skipped because the
-  // event never arrives as that type (e.g. the Stripe dashboard endpoint
-  // isn't subscribed to it, or test payments emit something else) versus a
-  // matching bug in the switch itself.
-  await logDebug("event_received", { event_type: event.type, detail: { event_id: event.id } });
+  // switch below has a matching case, and regardless of the API version the
+  // webhook destination is pinned to: event.type/event.id/event.api_version
+  // are top-level Event envelope fields, which Stripe has never changed
+  // shape across API versions (only data.object's nested fields are
+  // versioned) — so this log is unaffected by any basil/dahlia mismatch.
+  // Logged to console first so it shows up in Vercel logs even if the
+  // Supabase insert itself is what's failing.
+  console.log("DIAGNOSTIC event received:", { type: event.type, id: event.id, api_version: event.api_version });
+  await logDebug("event_received", {
+    event_type: event.type,
+    detail: { event_id: event.id, event_api_version: event.api_version },
+  });
 
   try {
     switch (event.type) {
