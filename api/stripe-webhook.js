@@ -14,6 +14,24 @@ function buffer(readable) {
   });
 }
 
+// Every billing_accounts write in this file was previously a fire-and-forget
+// .update() — a Postgres error or a match-clause that hit zero rows (e.g. a
+// stale/mismatched user_id) failed completely silently: no throw, no log,
+// Stripe still sees 200. That's exactly the class of bug that makes "the
+// webhook returned 200 but the DB didn't update" undiagnosable. This throws
+// on a real error (so it surfaces via the outer catch below) and logs when
+// the filter matched no row (which isn't a Postgres error, just a mismatch).
+async function updateBilling(match, patch, context) {
+  const { data, error } = await supabaseAdmin
+    .from("billing_accounts")
+    .update({ ...patch, updated_at: new Date().toISOString() })
+    .match(match)
+    .select();
+  if (error) throw new Error(`${context}: billing_accounts update failed — ${error.message}`);
+  if (!data?.length) console.error(`${context}: no billing_accounts row matched`, match);
+  return data;
+}
+
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).end();
 
@@ -35,15 +53,19 @@ export default async function handler(req, res) {
         const session = event.data.object;
         const userId = session.metadata?.supabase_user_id;
         const plan = session.metadata?.plan;
-        if (!userId || !plan) break;
+        if (!userId || !plan) {
+          console.error("checkout.session.completed: missing supabase_user_id/plan in session metadata", {
+            sessionId: session.id, metadata: session.metadata,
+          });
+          break;
+        }
 
         if (plan === "unlimited") {
-          await supabaseAdmin.from("billing_accounts").update({
+          await updateBilling({ user_id: userId }, {
             plan: "unlimited",
             subscription_status: "active",
             stripe_unlimited_subscription_id: session.subscription,
-            updated_at: new Date().toISOString(),
-          }).eq("user_id", userId);
+          }, "checkout.session.completed (unlimited)");
         } else if (plan === "payg") {
           // Base fee is paid via Checkout. The metered subscription has $0
           // due today, so it's created directly here using the payment
@@ -53,15 +75,14 @@ export default async function handler(req, res) {
             items: [{ price: process.env.STRIPE_PRICE_PAYG_METERED }],
             metadata: { supabase_user_id: userId, plan: "payg-metered" },
           });
-          await supabaseAdmin.from("billing_accounts").update({
+          await updateBilling({ user_id: userId }, {
             plan: "payg",
             subscription_status: "active",
             stripe_base_subscription_id: session.subscription,
             stripe_metered_subscription_id: metered.id,
             stripe_metered_item_id: metered.items.data[0]?.id,
             billing_period_observations: 0,
-            updated_at: new Date().toISOString(),
-          }).eq("user_id", userId);
+          }, "checkout.session.completed (payg)");
         } else if (plan === "card_setup") {
           // Unlocks observations 2-3 of the free trial — nothing charged.
           // Make it the default payment method too, so if this user later
@@ -74,9 +95,7 @@ export default async function handler(req, res) {
               });
             }
           }
-          await supabaseAdmin.from("billing_accounts")
-            .update({ has_payment_method: true, updated_at: new Date().toISOString() })
-            .eq("user_id", userId);
+          await updateBilling({ user_id: userId }, { has_payment_method: true }, "checkout.session.completed (card_setup)");
         }
         break;
       }
@@ -84,26 +103,22 @@ export default async function handler(req, res) {
       case "invoice.paid": {
         const invoice = event.data.object;
         if (invoice.billing_reason === "subscription_cycle" || invoice.billing_reason === "subscription_create") {
-          await supabaseAdmin.from("billing_accounts")
-            .update({ current_period_end: new Date(invoice.period_end * 1000).toISOString(), updated_at: new Date().toISOString() })
-            .eq("stripe_customer_id", invoice.customer);
+          await updateBilling({ stripe_customer_id: invoice.customer }, {
+            current_period_end: new Date(invoice.period_end * 1000).toISOString(),
+          }, "invoice.paid");
         }
         break;
       }
 
       case "invoice.payment_failed": {
         const invoice = event.data.object;
-        await supabaseAdmin.from("billing_accounts")
-          .update({ subscription_status: "past_due", updated_at: new Date().toISOString() })
-          .eq("stripe_customer_id", invoice.customer);
+        await updateBilling({ stripe_customer_id: invoice.customer }, { subscription_status: "past_due" }, "invoice.payment_failed");
         break;
       }
 
       case "customer.subscription.deleted": {
         const sub = event.data.object;
-        await supabaseAdmin.from("billing_accounts")
-          .update({ subscription_status: "canceled", updated_at: new Date().toISOString() })
-          .eq("stripe_customer_id", sub.customer);
+        await updateBilling({ stripe_customer_id: sub.customer }, { subscription_status: "canceled" }, "customer.subscription.deleted");
         break;
       }
 
