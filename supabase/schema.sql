@@ -363,4 +363,34 @@ create trigger reject_disposable_email_trigger
   before insert on auth.users
   for each row execute function public.reject_disposable_email();
 
+-- ─────────────────────────────────────────────────────────────────
+-- ClassroomLens Pro — Webhook debug log (temporary diagnostic aid)
+--
+-- Vercel's free-plan log retention is too short to catch a stripe-webhook
+-- failure after the fact, so this gives the webhook handler somewhere
+-- durable to record what happened on every billing_accounts write attempt:
+-- whether it ran, what it wrote, or why it didn't. Query it any time via
+-- the Supabase Table Editor or SQL Editor — no Vercel logs needed.
+--
+-- No grants to authenticated/anon at all — written only by the service-role
+-- webhook handler, viewed only via the dashboard's own privileged connection
+-- (which bypasses PostgREST/RLS entirely). Safe to `truncate` or `drop` this
+-- table once the payment flow is confirmed working; it's not meant to be a
+-- permanent audit log.
+--
+-- Run this once in your Supabase project (SQL Editor). Safe to re-run.
+-- ─────────────────────────────────────────────────────────────────
+
+create table if not exists public.webhook_debug_log (
+  id         uuid primary key default gen_random_uuid(),
+  created_at timestamptz not null default now(),
+  stage      text not null,   -- 'missing_metadata' | 'billing_updated' | 'billing_update_failed'
+  event_type text,            -- Stripe event type, e.g. 'checkout.session.completed'
+  session_id text,            -- Stripe object id, for cross-referencing in the Stripe dashboard
+  user_id    uuid,            -- resolved supabase_user_id, if any
+  plan       text,            -- resolved plan, if any
+  detail     jsonb            -- session metadata, the post-update billing_accounts row, or the error message
+);
+alter table public.webhook_debug_log enable row level security;
+
 alter table public.billing_accounts add column if not exists has_payment_method boolean not null default false;

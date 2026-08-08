@@ -14,21 +14,57 @@ function buffer(readable) {
   });
 }
 
+// Vercel's free-plan log retention is too short to catch a failure after
+// the fact, so every outcome also gets written to the webhook_debug_log
+// table (see supabase/schema.sql) — durable, queryable any time from the
+// Supabase dashboard, no Vercel logs required. This insert is itself the
+// most direct test of whether SUPABASE_SERVICE_ROLE_KEY can actually write:
+// if literally no debug rows ever appear, the key (or its table grants)
+// isn't working, independent of anything billing-specific.
+async function logDebug(stage, fields) {
+  try {
+    await supabaseAdmin.from("webhook_debug_log").insert({ stage, ...fields });
+  } catch (e) {
+    console.error("webhook_debug_log insert failed — service role key may not be able to write:", e.message);
+  }
+}
+
 // Every billing_accounts write in this file was previously a fire-and-forget
 // .update() — a Postgres error or a match-clause that hit zero rows (e.g. a
 // stale/mismatched user_id) failed completely silently: no throw, no log,
 // Stripe still sees 200. That's exactly the class of bug that makes "the
 // webhook returned 200 but the DB didn't update" undiagnosable. This throws
 // on a real error (so it surfaces via the outer catch below) and logs when
-// the filter matched no row (which isn't a Postgres error, just a mismatch).
-async function updateBilling(match, patch, context) {
+// the filter matched no row (which isn't a Postgres error, just a mismatch) —
+// both to the console and to webhook_debug_log.
+async function updateBilling({ match, patch, context, eventType, sessionId, userId, plan }) {
   const { data, error } = await supabaseAdmin
     .from("billing_accounts")
     .update({ ...patch, updated_at: new Date().toISOString() })
     .match(match)
     .select();
-  if (error) throw new Error(`${context}: billing_accounts update failed — ${error.message}`);
-  if (!data?.length) console.error(`${context}: no billing_accounts row matched`, match);
+
+  if (error) {
+    await logDebug("billing_update_failed", {
+      event_type: eventType, session_id: sessionId, user_id: userId, plan,
+      detail: { match, error: error.message },
+    });
+    throw new Error(`${context}: billing_accounts update failed — ${error.message}`);
+  }
+  if (!data?.length) {
+    console.error(`${context}: no billing_accounts row matched`, match);
+    await logDebug("billing_update_failed", {
+      event_type: eventType, session_id: sessionId, user_id: userId, plan,
+      detail: { match, error: "no row matched" },
+    });
+  } else {
+    // detail.row is the actual post-update billing_accounts row — the
+    // direct confirmation that the update ran and what it wrote.
+    await logDebug("billing_updated", {
+      event_type: eventType, session_id: sessionId, user_id: userId, plan,
+      detail: { row: data[0] },
+    });
+  }
   return data;
 }
 
@@ -57,15 +93,24 @@ export default async function handler(req, res) {
           console.error("checkout.session.completed: missing supabase_user_id/plan in session metadata", {
             sessionId: session.id, metadata: session.metadata,
           });
+          await logDebug("missing_metadata", {
+            event_type: event.type, session_id: session.id,
+            detail: { metadata: session.metadata },
+          });
           break;
         }
 
         if (plan === "unlimited") {
-          await updateBilling({ user_id: userId }, {
-            plan: "unlimited",
-            subscription_status: "active",
-            stripe_unlimited_subscription_id: session.subscription,
-          }, "checkout.session.completed (unlimited)");
+          await updateBilling({
+            match: { user_id: userId },
+            patch: {
+              plan: "unlimited",
+              subscription_status: "active",
+              stripe_unlimited_subscription_id: session.subscription,
+            },
+            context: "checkout.session.completed (unlimited)",
+            eventType: event.type, sessionId: session.id, userId, plan,
+          });
         } else if (plan === "payg") {
           // Base fee is paid via Checkout. The metered subscription has $0
           // due today, so it's created directly here using the payment
@@ -75,14 +120,19 @@ export default async function handler(req, res) {
             items: [{ price: process.env.STRIPE_PRICE_PAYG_METERED }],
             metadata: { supabase_user_id: userId, plan: "payg-metered" },
           });
-          await updateBilling({ user_id: userId }, {
-            plan: "payg",
-            subscription_status: "active",
-            stripe_base_subscription_id: session.subscription,
-            stripe_metered_subscription_id: metered.id,
-            stripe_metered_item_id: metered.items.data[0]?.id,
-            billing_period_observations: 0,
-          }, "checkout.session.completed (payg)");
+          await updateBilling({
+            match: { user_id: userId },
+            patch: {
+              plan: "payg",
+              subscription_status: "active",
+              stripe_base_subscription_id: session.subscription,
+              stripe_metered_subscription_id: metered.id,
+              stripe_metered_item_id: metered.items.data[0]?.id,
+              billing_period_observations: 0,
+            },
+            context: "checkout.session.completed (payg)",
+            eventType: event.type, sessionId: session.id, userId, plan,
+          });
         } else if (plan === "card_setup") {
           // Unlocks observations 2-3 of the free trial — nothing charged.
           // Make it the default payment method too, so if this user later
@@ -95,7 +145,12 @@ export default async function handler(req, res) {
               });
             }
           }
-          await updateBilling({ user_id: userId }, { has_payment_method: true }, "checkout.session.completed (card_setup)");
+          await updateBilling({
+            match: { user_id: userId },
+            patch: { has_payment_method: true },
+            context: "checkout.session.completed (card_setup)",
+            eventType: event.type, sessionId: session.id, userId, plan,
+          });
         }
         break;
       }
@@ -103,22 +158,35 @@ export default async function handler(req, res) {
       case "invoice.paid": {
         const invoice = event.data.object;
         if (invoice.billing_reason === "subscription_cycle" || invoice.billing_reason === "subscription_create") {
-          await updateBilling({ stripe_customer_id: invoice.customer }, {
-            current_period_end: new Date(invoice.period_end * 1000).toISOString(),
-          }, "invoice.paid");
+          await updateBilling({
+            match: { stripe_customer_id: invoice.customer },
+            patch: { current_period_end: new Date(invoice.period_end * 1000).toISOString() },
+            context: "invoice.paid",
+            eventType: event.type, sessionId: invoice.id,
+          });
         }
         break;
       }
 
       case "invoice.payment_failed": {
         const invoice = event.data.object;
-        await updateBilling({ stripe_customer_id: invoice.customer }, { subscription_status: "past_due" }, "invoice.payment_failed");
+        await updateBilling({
+          match: { stripe_customer_id: invoice.customer },
+          patch: { subscription_status: "past_due" },
+          context: "invoice.payment_failed",
+          eventType: event.type, sessionId: invoice.id,
+        });
         break;
       }
 
       case "customer.subscription.deleted": {
         const sub = event.data.object;
-        await updateBilling({ stripe_customer_id: sub.customer }, { subscription_status: "canceled" }, "customer.subscription.deleted");
+        await updateBilling({
+          match: { stripe_customer_id: sub.customer },
+          patch: { subscription_status: "canceled" },
+          context: "customer.subscription.deleted",
+          eventType: event.type, sessionId: sub.id,
+        });
         break;
       }
 
