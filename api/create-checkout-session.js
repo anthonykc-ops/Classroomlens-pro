@@ -15,14 +15,14 @@ const PRICE_IDS = {
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
-  const user = await getAuthedUser(req);
-  if (!user) return res.status(401).json({ error: "Not authenticated" });
-
-  const { plan } = req.body || {};
-  const isCardSetup = plan === "card_setup";
-  if (!isCardSetup && !PRICE_IDS[plan]) return res.status(400).json({ error: "Invalid plan" });
-
   try {
+    const user = await getAuthedUser(req);
+    if (!user) return res.status(401).json({ error: "Not authenticated" });
+
+    const { plan } = req.body || {};
+    const isCardSetup = plan === "card_setup";
+    if (!isCardSetup && !PRICE_IDS[plan]) return res.status(400).json({ error: "Invalid plan" });
+
     const { data: billing } = await supabaseAdmin
       .from("billing_accounts")
       .select("stripe_customer_id")

@@ -11,10 +11,10 @@ const FREE_LIMIT = 3;
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
-  const user = await getAuthedUser(req);
-  if (!user) return res.status(401).json({ error: "Not authenticated" });
-
   try {
+    const user = await getAuthedUser(req);
+    if (!user) return res.status(401).json({ error: "Not authenticated" });
+
     const { data: billing, error } = await supabaseAdmin
       .from("billing_accounts")
       .select("*")
