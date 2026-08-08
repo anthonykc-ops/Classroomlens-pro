@@ -108,6 +108,40 @@ export default async function handler(req, res) {
         const session = event.data.object;
         const userId = session.metadata?.supabase_user_id;
         const plan = session.metadata?.plan;
+
+        // TEMP DIAGNOSTIC — remove once billing_accounts matching is confirmed
+        // working. Logs the raw metadata Stripe sent, the user_id we derive
+        // from it, and whether a billing_accounts row for that user_id exists
+        // *before* we ever attempt the update — so a "no row matched" failure
+        // in updateBilling can be told apart from "row exists but the update
+        // itself is wrong" or "user_id was never on the session at all".
+        console.log("DIAGNOSTIC checkout.session.completed metadata:", {
+          sessionId: session.id, metadata: session.metadata, derivedUserId: userId, derivedPlan: plan,
+        });
+        let precheckRow = null;
+        let precheckError = null;
+        if (userId) {
+          const { data, error } = await supabaseAdmin
+            .from("billing_accounts")
+            .select("*")
+            .eq("user_id", userId)
+            .maybeSingle();
+          precheckRow = data;
+          precheckError = error;
+          console.log("DIAGNOSTIC billing_accounts precheck:", {
+            userId, found: !!data, row: data, error: error?.message,
+          });
+        }
+        await logDebug("checkout_session_diagnostic", {
+          event_type: event.type, session_id: session.id, user_id: userId, plan,
+          detail: {
+            metadata: session.metadata,
+            precheck_found: !!precheckRow,
+            precheck_row: precheckRow,
+            precheck_error: precheckError?.message,
+          },
+        });
+
         if (!userId || !plan) {
           console.error("checkout.session.completed: missing supabase_user_id/plan in session metadata", {
             sessionId: session.id, metadata: session.metadata,
