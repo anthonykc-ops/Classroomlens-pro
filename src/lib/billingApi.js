@@ -1,16 +1,5 @@
 import { supabase } from "./supabaseClient";
-
-async function authedFetch(path, body) {
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session) throw new Error("Not signed in.");
-  const res = await fetch(path, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
-    body: JSON.stringify(body || {}),
-  });
-  const data = await res.json().catch(() => ({}));
-  return { ok: res.ok, status: res.status, data };
-}
+import { authedFetch } from "./apiClient.js";
 
 // Read-only — RLS only allows a user to see their own row.
 export async function getBillingAccount(userId) {

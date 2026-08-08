@@ -7,6 +7,7 @@ import { Chip, Card, Label, Btn, TextInput, Spinner, ScoreRing, Waveform, Rating
 import * as sessionsApi from "./lib/sessionsApi.js";
 import * as orgApi from "./lib/orgApi.js";
 import { getBillingAccount, checkObservationAllowance, hasSeenPricingIntro, markPricingIntroSeen, openBillingPortal } from "./lib/billingApi.js";
+import { callClaude } from "./lib/claudeApi.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GLOBAL STYLES
@@ -318,7 +319,6 @@ const ratingColor = (r) => ratingColors[r] || "#475569";
 // Sessions used to live in localStorage under this key before cloud sync (phase 2).
 // Kept around only so SettingsView can offer a one-time import into the user's account.
 const LEGACY_STORAGE_KEY = "classroomlens_sessions_v2";
-const APIKEY_STORAGE = "classroomlens_apikey";
 
 function loadLegacySessions() {
   try { return JSON.parse(localStorage.getItem(LEGACY_STORAGE_KEY) || "[]"); } catch { return []; }
@@ -330,31 +330,7 @@ function clearLegacySessions() {
 // ─────────────────────────────────────────────────────────────────────────────
 // API
 // ─────────────────────────────────────────────────────────────────────────────
-async function callClaude(apiKey, system, userMsg, maxTokens = 3000) {
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-      "anthropic-dangerous-direct-browser-access": "true",
-    },
-    body: JSON.stringify({
-      model: "claude-sonnet-4-6",
-      max_tokens: maxTokens,
-      system,
-      messages: [{ role: "user", content: userMsg }],
-    }),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err?.error?.message || `API error ${res.status}`);
-  }
-  const data = await res.json();
-  return (data.content || []).map(c => c.text || "").join("");
-}
-
-async function analyzeObservation(apiKey, transcript, frameworkKey) {
+async function analyzeObservation(transcript, frameworkKey) {
   const fw = FRAMEWORKS[frameworkKey];
   const allComponents = Object.entries(fw.domains)
     .flatMap(([, d]) => Object.entries(d.components).map(([ck, cn]) => `${ck}: ${cn}`))
@@ -411,14 +387,14 @@ Required JSON structure (include ALL keys even if empty):
 
 Only include evidence for components directly observable in the transcript. Use 2 (or equivalent) as default when behavior is present but limited.`;
 
-  const text = await callClaude(apiKey, system,
+  const text = await callClaude(system,
     `FRAMEWORK COMPONENTS:\n${allComponents}\n\nTRANSCRIPT:\n${transcript}\n\nAnalyze this lesson thoroughly.`,
     3500
   );
   return JSON.parse(text.replace(/```json|```/g, "").trim());
 }
 
-async function generateCoachingReply(apiKey, session, messages, confType) {
+async function generateCoachingReply(session, messages, confType) {
   const fw = FRAMEWORKS[session.framework];
   const { analysis, meta } = session;
   const history = messages.map(m => `${m.role === "user" ? "Teacher" : "Coach"}: ${m.content}`).join("\n");
@@ -433,10 +409,10 @@ Overall rating: ${analysis.overallRating}/${Object.keys(fw.ratingScale).length}
 Your role: Be warm, Socratic, evidence-based. Ask one follow-up question per response.
 Keep responses to 3–5 sentences. Do not lecture. Draw out the teacher's thinking.`;
 
-  return callClaude(apiKey, system, `Conversation so far:\n${history}\n\nCoach:`, 600);
+  return callClaude(system, `Conversation so far:\n${history}\n\nCoach:`, 600);
 }
 
-async function generateReport(apiKey, session, reportType) {
+async function generateReport(session, reportType) {
   const fw = FRAMEWORKS[session.framework];
   const { analysis, meta } = session;
   const types = {
@@ -449,7 +425,7 @@ async function generateReport(apiKey, session, reportType) {
 Write 4–5 professional paragraphs. Do not use headers or bullet points — flowing prose only.
 Use educator language. Be specific about what was observed.`;
 
-  return callClaude(apiKey, system,
+  return callClaude(system,
     `Teacher: ${meta.teacher || "Teacher"} | Grade: ${meta.grade} | Subject: ${meta.subject} | Date: ${meta.date}
 Framework: ${fw.name} | Observer: ${meta.observer || "Observer"} | School: ${meta.school || ""}
 Overall Rating: ${analysis.overallRating}/${Object.keys(fw.ratingScale).length} (${fw.ratingScale[Math.round(analysis.overallRating)]})
@@ -462,9 +438,9 @@ Scripted example that worked: ${analysis.scriptedExamples?.whatWorked}`,
   );
 }
 
-async function generateCoachingTip(apiKey, compKey, compName, rating, evidence, fw) {
+async function generateCoachingTip(compKey, compName, rating, evidence, fw) {
   const ratingLabel = fw.ratingScale[rating] || "Basic";
-  return callClaude(apiKey, "",
+  return callClaude("",
     `You are an instructional coach. Write a warm, specific 3-sentence coaching tip for a teacher rated "${ratingLabel}" on ${fw.name} component ${compKey}: "${compName}".
 Evidence from lesson: ${(evidence || []).join("; ")}
 Be direct, encouraging, and give one concrete next step. No bullet points — write as if speaking directly to them.`,
@@ -472,7 +448,7 @@ Be direct, encouraging, and give one concrete next step. No bullet points — wr
   );
 }
 
-async function analyzeIEPMeeting(apiKey, notesText, meta) {
+async function analyzeIEPMeeting(notesText, meta) {
   const system = `You are an expert special education case manager and IDEA compliance specialist reviewing notes from an IEP meeting.
 Analyze the notes thoroughly and return ONLY valid JSON — no preamble, no markdown fences, no extra text.
 
@@ -501,11 +477,11 @@ Ground every item in the actual notes provided — do not invent details. If the
     meta?.date && `Date: ${meta.date}`,
   ].filter(Boolean).join(" | ");
 
-  const text = await callClaude(apiKey, system, `${metaLine ? metaLine + "\n\n" : ""}IEP MEETING NOTES:\n${notesText}\n\nAnalyze these notes thoroughly.`, 3000);
+  const text = await callClaude(system, `${metaLine ? metaLine + "\n\n" : ""}IEP MEETING NOTES:\n${notesText}\n\nAnalyze these notes thoroughly.`, 3000);
   return JSON.parse(text.replace(/```json|```/g, "").trim());
 }
 
-async function analyzePLCMeeting(apiKey, notesText, meta) {
+async function analyzePLCMeeting(notesText, meta) {
   const system = `You are an expert instructional coach and PLC (Professional Learning Community) facilitator reviewing notes or a transcript from a PLC team meeting.
 Analyze the content thoroughly and return ONLY valid JSON — no preamble, no markdown fences, no extra text.
 
@@ -535,11 +511,11 @@ Ground every item in the actual notes/transcript provided — do not invent deta
     meta?.date && `Date: ${meta.date}`,
   ].filter(Boolean).join(" | ");
 
-  const text = await callClaude(apiKey, system, `${metaLine ? metaLine + "\n\n" : ""}PLC MEETING NOTES:\n${notesText}\n\nAnalyze this meeting thoroughly.`, 3200);
+  const text = await callClaude(system, `${metaLine ? metaLine + "\n\n" : ""}PLC MEETING NOTES:\n${notesText}\n\nAnalyze this meeting thoroughly.`, 3200);
   return JSON.parse(text.replace(/```json|```/g, "").trim());
 }
 
-async function analyzeLessonPlan(apiKey, planText, frameworkKey) {
+async function analyzeLessonPlan(planText, frameworkKey) {
   const fw = FRAMEWORKS[frameworkKey];
   const allComponents = Object.entries(fw.domains)
     .flatMap(([, d]) => Object.entries(d.components).map(([ck, cn]) => `${ck}: ${cn}`))
@@ -575,109 +551,8 @@ This is a WRITTEN PLAN, not a classroom observation — only include "evidence" 
 FRAMEWORK COMPONENTS:
 ${allComponents}`;
 
-  const text = await callClaude(apiKey, system, `LESSON PLAN:\n${planText}\n\nAnalyze this lesson plan thoroughly.`, 3500);
+  const text = await callClaude(system, `LESSON PLAN:\n${planText}\n\nAnalyze this lesson plan thoroughly.`, 3500);
   return JSON.parse(text.replace(/```json|```/g, "").trim());
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// API KEY SETUP SCREEN
-// ─────────────────────────────────────────────────────────────────────────────
-function ApiKeySetup({ onSave, user, onSignOut }) {
-  const [key, setKey] = useState("");
-  const [testing, setTesting] = useState(false);
-  const [err, setErr] = useState("");
-  const [envKey] = useState(() => import.meta.env?.VITE_ANTHROPIC_API_KEY || "");
-
-  useEffect(() => {
-    if (envKey && envKey !== "sk-ant-your-key-goes-here") {
-      onSave(envKey);
-    }
-  }, [envKey, onSave]);
-
-  const test = async () => {
-    if (!key.trim()) { setErr("Please enter your API key."); return; }
-    setTesting(true); setErr("");
-    try {
-      await callClaude(key.trim(), "", "Say OK", 10);
-      localStorage.setItem(APIKEY_STORAGE, key.trim());
-      onSave(key.trim());
-    } catch (e) {
-      setErr("Invalid key or connection error: " + e.message);
-    }
-    setTesting(false);
-  };
-
-  return (
-    <div style={{ minHeight: "100vh", background: "var(--bg)", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
-      <div style={{ maxWidth: 520, width: "100%" }}>
-        {user && (
-          <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 10, marginBottom: 20 }}>
-            <div style={{ fontSize: 11, color: "var(--text-4)", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 6, padding: "3px 10px" }}>
-              Signed in as <strong style={{ color: "var(--text-2)" }}>{user.email}</strong>
-            </div>
-            <Btn size="sm" variant="ghost" onClick={onSignOut}>Sign Out</Btn>
-          </div>
-        )}
-        <div style={{ textAlign: "center", marginBottom: 32 }}>
-          <div style={{ width: 52, height: 52, background: "linear-gradient(135deg,#4f46e5,#4338ca)", borderRadius: 13, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px", boxShadow: "var(--shadow-md)" }}><Icon name="lens" size={26} /></div>
-          <h1 style={{ fontSize: 25, fontWeight: 800, color: "var(--text)", marginBottom: 6, letterSpacing: "-0.01em" }}>ClassroomLens <span style={{ color: "var(--accent)" }}>Pro</span></h1>
-          <p style={{ fontSize: 14, color: "var(--text-4)" }}>AI-Powered Classroom Observation Platform</p>
-        </div>
-
-        <Card style={{ boxShadow: "var(--shadow-lg)" }}>
-          <Label>Connect Your AI Brain</Label>
-          <p style={{ fontSize: 13, color: "var(--text-3)", lineHeight: 1.8, marginBottom: 20 }}>
-            ClassroomLens uses the Anthropic Claude API to analyze lessons and generate coaching feedback.
-            Your key is stored locally on your device and never sent anywhere except Anthropic's servers.
-          </p>
-
-          <div style={{ background: "var(--surface-2)", border: "1px solid var(--border)", borderRadius: 8, padding: 14, marginBottom: 20 }}>
-            <div style={{ fontSize: 11, color: "var(--warning)", fontWeight: 700, marginBottom: 8 }}>HOW TO GET YOUR API KEY</div>
-            {[
-              ["1", "Go to", "console.anthropic.com", "https://console.anthropic.com"],
-              ["2", "Create an account (free)", "", ""],
-              ["3", "Click API Keys → Create Key", "", ""],
-              ["4", "Copy the key (starts with sk-ant-...)", "", ""],
-              ["5", "Paste it below and click Connect", "", ""],
-            ].map(([n, text, link, href]) => (
-              <div key={n} style={{ display: "flex", gap: 10, marginBottom: 6, fontSize: 12, color: "var(--text-2)", alignItems: "center" }}>
-                <span style={{ background: "var(--accent-soft)", color: "var(--accent)", borderRadius: "50%", width: 20, height: 20, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 800, flexShrink: 0 }}>{n}</span>
-                <span>{text} {link && <a href={href} target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>{link}</a>}</span>
-              </div>
-            ))}
-          </div>
-
-          <div style={{ marginBottom: 8 }}>
-            <div style={{ fontSize: 11, color: "var(--text-4)", marginBottom: 5, fontWeight: 600 }}>ANTHROPIC API KEY</div>
-            <input
-              type="password"
-              value={key}
-              onChange={e => setKey(e.target.value)}
-              placeholder="sk-ant-api03-..."
-              onKeyDown={e => e.key === "Enter" && test()}
-              style={{ background: "var(--surface)", border: "1px solid var(--border-strong)", borderRadius: 7, padding: "11px 14px", color: "var(--text)", fontSize: 13, width: "100%", outline: "none", letterSpacing: "0.04em" }}
-            />
-          </div>
-
-          {err && <p style={{ fontSize: 12, color: "var(--danger)", marginBottom: 10 }}>{err}</p>}
-
-          <Btn onClick={test} disabled={testing} full size="lg" style={{ marginTop: 4 }}>
-            {testing ? <span style={{ display: "flex", alignItems: "center", gap: 10, justifyContent: "center" }}><Spinner />Testing connection…</span> : "Connect API Key →"}
-          </Btn>
-
-          <p style={{ fontSize: 10, color: "var(--text-5)", marginTop: 14, textAlign: "center", lineHeight: 1.6 }}>
-            Cost: roughly $0.02–0.10 per analysis. Your key never leaves your browser except to reach Anthropic.
-          </p>
-        </Card>
-
-        <div style={{ textAlign: "center", marginTop: 20 }}>
-          <p style={{ fontSize: 11, color: "var(--text-5)" }}>
-            Need help? Email <a href="mailto:anthonykc@gmail.com" style={{ color: "var(--accent)" }}>anthonykc@gmail.com</a>
-          </p>
-        </div>
-      </div>
-    </div>
-  );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -713,7 +588,7 @@ function mergeTranscriptAndNotes(entries, notes) {
   return lines.join("\n");
 }
 
-function RecordView({ apiKey, onAnalyze, onUsageChecked }) {
+function RecordView({ onAnalyze, onUsageChecked }) {
   const [meta, setMeta] = useState({ teacher: "", grade: "", subject: "", date: new Date().toISOString().split("T")[0], observer: "", school: "" });
   const [framework, setFramework] = useState("danielson");
   const [mode, setMode] = useState("manual");
@@ -850,8 +725,9 @@ function RecordView({ apiKey, onAnalyze, onUsageChecked }) {
     if (text.split(" ").length < 20) { setErr("Transcript too short. Please provide at least a few minutes of conversation."); return; }
     setErr(""); setLoading(true);
 
-    // Authoritative billing gate — runs before the (paid, user-owned-key) Claude
-    // call so a trial user who's out of free observations never even fires it.
+    // Authoritative billing gate — runs before the Claude call (which now bills
+    // against our own shared key) so a trial user who's out of free observations
+    // never even fires it.
     let allowance;
     try {
       allowance = await checkObservationAllowance();
@@ -868,9 +744,9 @@ function RecordView({ apiKey, onAnalyze, onUsageChecked }) {
 
     let result;
     try {
-      result = await analyzeObservation(apiKey, text, framework);
+      result = await analyzeObservation(text, framework);
     } catch (e) {
-      setErr("Analysis failed: " + e.message + ". Check your API key in Settings.");
+      setErr("Analysis failed: " + e.message);
       setLoading(false);
       return;
     }
@@ -1078,7 +954,7 @@ function RecordView({ apiKey, onAnalyze, onUsageChecked }) {
 // Renders a framework's domains/components against an { [componentKey]: {rating, evidence, feedback} }
 // object, with an optional expandable AI coaching tip per component. Shared by AnalysisView
 // (live observations) and LessonPlanView (written plans mapped to the same frameworks).
-function FrameworkEvidenceBlock({ fw, evidence, apiKey }) {
+function FrameworkEvidenceBlock({ fw, evidence }) {
   const [tips, setTips] = useState({});
   const [loadingTip, setLoadingTip] = useState({});
   const [openTip, setOpenTip] = useState(null);
@@ -1089,7 +965,7 @@ function FrameworkEvidenceBlock({ fw, evidence, apiKey }) {
     if (tips[ck]) return;
     setLoadingTip(p => ({ ...p, [ck]: true }));
     try {
-      const tip = await generateCoachingTip(apiKey, ck, cn, rating, ev, fw);
+      const tip = await generateCoachingTip(ck, cn, rating, ev, fw);
       setTips(p => ({ ...p, [ck]: tip }));
     } catch {}
     setLoadingTip(p => ({ ...p, [ck]: false }));
@@ -1143,7 +1019,7 @@ function FrameworkEvidenceBlock({ fw, evidence, apiKey }) {
   );
 }
 
-function AnalysisView({ session, apiKey }) {
+function AnalysisView({ session }) {
   if (!session) return <EmptyState icon="⚡" text="Run an observation to see AI analysis here." />;
 
   const { analysis, framework: fwKey, meta } = session;
@@ -1227,7 +1103,7 @@ function AnalysisView({ session, apiKey }) {
       {/* Evidence by component */}
       <Card>
         <Label>Evidence by Component</Label>
-        <FrameworkEvidenceBlock fw={fw} evidence={analysis.evidence} apiKey={apiKey} />
+        <FrameworkEvidenceBlock fw={fw} evidence={analysis.evidence} />
       </Card>
 
       {/* Student interventions */}
@@ -1324,7 +1200,7 @@ function GrowthPlanView({ session }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // COACHING CONFERENCE VIEW
 // ─────────────────────────────────────────────────────────────────────────────
-function CoachingView({ session, apiKey }) {
+function CoachingView({ session }) {
   const [confType, setConfType] = useState("pre");
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
@@ -1343,7 +1219,7 @@ function CoachingView({ session, apiKey }) {
     const updated = [...messages, { role: "user", content: msg }];
     setMessages(updated); setInput(""); setLoading(true);
     try {
-      const reply = await generateCoachingReply(apiKey, session, updated, confType);
+      const reply = await generateCoachingReply(session, updated, confType);
       setMessages(p => [...p, { role: "assistant", content: reply }]);
     } catch (e) {
       setMessages(p => [...p, { role: "assistant", content: "Error: " + e.message }]);
@@ -1410,7 +1286,7 @@ function CoachingView({ session, apiKey }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // REPORTS VIEW
 // ─────────────────────────────────────────────────────────────────────────────
-function ReportView({ session, apiKey }) {
+function ReportView({ session }) {
   const [reportType, setReportType] = useState("formal");
   const [reportText, setReportText] = useState("");
   const [generating, setGenerating] = useState(false);
@@ -1422,7 +1298,7 @@ function ReportView({ session, apiKey }) {
   const generate = async () => {
     setGenerating(true); setReportText("");
     try {
-      const text = await generateReport(apiKey, session, reportType);
+      const text = await generateReport(session, reportType);
       setReportText(text);
     } catch (e) { setReportText("Error generating report: " + e.message); }
     setGenerating(false);
@@ -1499,7 +1375,7 @@ const MEETING_TYPES = ["Initial Evaluation", "Annual Review", "Triennial Reevalu
 const IEP_STATUS_COLOR = { "on-track": "var(--success)", "needs-revision": "var(--warning)", "new": "var(--accent)", "unclear": "var(--text-4)" };
 const IEP_FLAG_COLOR = { ok: "var(--success)", watch: "var(--warning)", missing: "var(--danger)" };
 
-function IEPView({ apiKey }) {
+function IEPView({ onUsageChecked }) {
   const [meta, setMeta] = useState({ student: "", grade: "", date: new Date().toISOString().split("T")[0], meetingType: MEETING_TYPES[1], caseManager: "" });
   const [mode, setMode] = useState("manual");
   const [notes, setNotes] = useState("");
@@ -1591,10 +1467,27 @@ function IEPView({ apiKey }) {
     if (!text) { setErr("Please record or paste meeting notes first."); return; }
     if (text.split(" ").length < 15) { setErr("Notes are too short for a meaningful analysis."); return; }
     setErr(""); setLoading(true); setResult(null);
+
+    // Counts against the same trial/plan limits as a classroom observation —
+    // it's the same Claude spend on our shared key either way.
+    let allowance;
     try {
-      setResult(await analyzeIEPMeeting(apiKey, text, meta));
+      allowance = await checkObservationAllowance();
+      onUsageChecked?.(allowance);
     } catch (e) {
-      setErr("Analysis failed: " + e.message + ". Check your API key in Settings.");
+      setErr("Couldn't verify your plan: " + e.message);
+      setLoading(false);
+      return;
+    }
+    if (!allowance.allowed) {
+      setLoading(false);
+      return; // parent shows the paywall via onUsageChecked
+    }
+
+    try {
+      setResult(await analyzeIEPMeeting(text, meta));
+    } catch (e) {
+      setErr("Analysis failed: " + e.message);
     }
     setLoading(false);
   };
@@ -1788,7 +1681,7 @@ function IEPView({ apiKey }) {
 const PLC_STATUS_COLOR = { aligned: "var(--success)", partial: "var(--warning)", unclear: "var(--text-4)" };
 const PLC_FLAG_COLOR = { strong: "var(--success)", watch: "var(--warning)", concern: "var(--danger)" };
 
-function PLCView({ apiKey }) {
+function PLCView({ onUsageChecked }) {
   const [meta, setMeta] = useState({ topic: "", team: "", facilitator: "", date: new Date().toISOString().split("T")[0] });
   const [mode, setMode] = useState("manual");
   const [notes, setNotes] = useState("");
@@ -1894,10 +1787,27 @@ function PLCView({ apiKey }) {
     if (!text) { setErr("Please record, paste, or upload meeting notes first."); return; }
     if (text.split(" ").length < 15) { setErr("This looks too short for a meaningful analysis."); return; }
     setErr(""); setLoading(true); setResult(null);
+
+    // Counts against the same trial/plan limits as a classroom observation —
+    // it's the same Claude spend on our shared key either way.
+    let allowance;
     try {
-      setResult(await analyzePLCMeeting(apiKey, text, meta));
+      allowance = await checkObservationAllowance();
+      onUsageChecked?.(allowance);
     } catch (e) {
-      setErr("Analysis failed: " + e.message + ". Check your API key in Settings.");
+      setErr("Couldn't verify your plan: " + e.message);
+      setLoading(false);
+      return;
+    }
+    if (!allowance.allowed) {
+      setLoading(false);
+      return; // parent shows the paywall via onUsageChecked
+    }
+
+    try {
+      setResult(await analyzePLCMeeting(text, meta));
+    } catch (e) {
+      setErr("Analysis failed: " + e.message);
     }
     setLoading(false);
   };
@@ -2118,7 +2028,7 @@ const DIMENSION_LABELS = {
 };
 const DIMENSION_RATING_LABEL = { 1: "Needs Work", 2: "Developing", 3: "Solid", 4: "Strong" };
 
-function LessonPlanView({ apiKey }) {
+function LessonPlanView({ onUsageChecked }) {
   const [meta, setMeta] = useState({ title: "", grade: "", subject: "" });
   const [framework, setFramework] = useState("danielson");
   const [mode, setMode] = useState("manual");
@@ -2226,10 +2136,27 @@ function LessonPlanView({ apiKey }) {
     if (!text) { setErr("Please paste or upload a lesson plan first."); return; }
     if (text.split(" ").length < 20) { setErr("This looks too short to be a full lesson plan."); return; }
     setErr(""); setLoading(true); setResult(null);
+
+    // Counts against the same trial/plan limits as a classroom observation —
+    // it's the same Claude spend on our shared key either way.
+    let allowance;
     try {
-      setResult(await analyzeLessonPlan(apiKey, text, framework));
+      allowance = await checkObservationAllowance();
+      onUsageChecked?.(allowance);
     } catch (e) {
-      setErr("Analysis failed: " + e.message + ". Check your API key in Settings.");
+      setErr("Couldn't verify your plan: " + e.message);
+      setLoading(false);
+      return;
+    }
+    if (!allowance.allowed) {
+      setLoading(false);
+      return; // parent shows the paywall via onUsageChecked
+    }
+
+    try {
+      setResult(await analyzeLessonPlan(text, framework));
+    } catch (e) {
+      setErr("Analysis failed: " + e.message);
     }
     setLoading(false);
   };
@@ -2382,7 +2309,7 @@ function LessonPlanView({ apiKey }) {
           {result.evidence && Object.keys(result.evidence).length > 0 && (
             <Card>
               <Label>Framework Mapping — {fw.shortName}</Label>
-              <FrameworkEvidenceBlock fw={fw} evidence={result.evidence} apiKey={apiKey} />
+              <FrameworkEvidenceBlock fw={fw} evidence={result.evidence} />
             </Card>
           )}
         </div>
@@ -2600,26 +2527,10 @@ function SessionsList({ sessions, loading, currentUserId, onSelect, onDelete }) 
 // ─────────────────────────────────────────────────────────────────────────────
 const PLAN_LABEL = { trial: "Free Trial", payg: "Pay As You Go", unlimited: "Unlimited" };
 
-function SettingsView({ apiKey, onChangeKey, onClearSessions, sessionCount, legacyCount, onImportLegacy, billing, onOpenPricing }) {
-  const [newKey, setNewKey] = useState("");
-  const [testing, setTesting] = useState(false);
-  const [msg, setMsg] = useState("");
+function SettingsView({ onClearSessions, sessionCount, legacyCount, onImportLegacy, billing, onOpenPricing }) {
   const [importing, setImporting] = useState(false);
   const [portalLoading, setPortalLoading] = useState(false);
   const [portalErr, setPortalErr] = useState("");
-
-  const saveKey = async () => {
-    if (!newKey.trim()) return;
-    setTesting(true); setMsg("");
-    try {
-      await callClaude(newKey.trim(), "", "Say OK", 10);
-      localStorage.setItem(APIKEY_STORAGE, newKey.trim());
-      onChangeKey(newKey.trim());
-      setMsg("✓ API key updated and connected!");
-      setNewKey("");
-    } catch(e) { setMsg("✗ Error: " + e.message); }
-    setTesting(false);
-  };
 
   const manageSubscription = async () => {
     setPortalLoading(true); setPortalErr("");
@@ -2681,19 +2592,6 @@ function SettingsView({ apiKey, onChangeKey, onClearSessions, sessionCount, lega
         <p style={{ fontSize: 11, color: "var(--text-5)", marginTop: 14 }}>
           Need a District plan for multiple schools? <a href="mailto:anthonykc@gmail.com?subject=District%20Plan%20Inquiry" style={{ color: "var(--accent)" }}>Contact us →</a>
         </p>
-      </Card>
-
-      <Card>
-        <Label>API Key</Label>
-        <div style={{ fontSize: 12, color: "var(--text-3)", marginBottom: 12 }}>
-          Current key: <span style={{ fontFamily:"'JetBrains Mono',monospace",color:"var(--text-4)" }}>{apiKey ? apiKey.slice(0,18)+"…" : "Not set"}</span>
-        </div>
-        <TextInput label="New API Key" value={newKey} onChange={setNewKey} placeholder="sk-ant-api03-..." />
-        {msg && <p style={{ fontSize:12, color: msg.startsWith("✓")?"var(--success)":"var(--danger)", marginTop:8 }}>{msg}</p>}
-        <Btn onClick={saveKey} disabled={testing||!newKey.trim()} style={{ marginTop:10 }}>
-          {testing ? <span style={{ display:"flex",gap:8,alignItems:"center" }}><Spinner size={14}/>Testing…</span> : "Update API Key"}
-        </Btn>
-        <p style={{ fontSize:11,color:"var(--text-5)",marginTop:10 }}>Get your key at <a href="https://console.anthropic.com" target="_blank" rel="noreferrer" style={{ color:"var(--accent)" }}>console.anthropic.com</a></p>
       </Card>
 
       <Card>
@@ -3017,11 +2915,6 @@ export default function App() {
   // before we even wait on auth to resolve), and / falls back to it for logged-out visitors.
   // Everything else (notably /app) goes through the normal sign-in → app flow below.
   const path = window.location.pathname;
-  const [apiKey, setApiKey] = useState(() => {
-    const env = import.meta.env?.VITE_ANTHROPIC_API_KEY;
-    if (env && env !== "sk-ant-your-key-goes-here") return env;
-    return localStorage.getItem(APIKEY_STORAGE) || "";
-  });
   const [tab, setTab] = useState("dashboard");
   const [sessions, setSessions] = useState([]);
   const [sessionsLoading, setSessionsLoading] = useState(true);
@@ -3193,13 +3086,6 @@ export default function App() {
     );
   }
 
-  if (!apiKey) return (
-    <>
-      <style>{css}</style>
-      <ApiKeySetup onSave={setApiKey} user={user} onSignOut={signOut} />
-    </>
-  );
-
   // A user who already belongs to a school just silently drops the ?join= param.
   if (joinCode && org) {
     window.history.replaceState({}, "", window.location.pathname);
@@ -3340,17 +3226,17 @@ export default function App() {
             </div>
           )}
           {tab === "dashboard" && <DashboardView sessions={sessions} onSelect={s => { setActiveSession(s); setTab("analysis"); }} onNew={() => setTab("record")} />}
-          {tab === "record"    && <RecordView apiKey={apiKey} onAnalyze={handleAnalyze} onUsageChecked={handleUsageChecked} />}
-          {tab === "analysis"  && <AnalysisView session={activeSession} apiKey={apiKey} />}
+          {tab === "record"    && <RecordView onAnalyze={handleAnalyze} onUsageChecked={handleUsageChecked} />}
+          {tab === "analysis"  && <AnalysisView session={activeSession} />}
           {tab === "growth"    && <GrowthPlanView session={activeSession} />}
-          {tab === "coaching"  && <CoachingView session={activeSession} apiKey={apiKey} />}
-          {tab === "report"    && <ReportView session={activeSession} apiKey={apiKey} />}
-          {tab === "iep"        && <IEPView apiKey={apiKey} />}
-          {tab === "plc"        && <PLCView apiKey={apiKey} />}
-          {tab === "lessonplan" && <LessonPlanView apiKey={apiKey} />}
+          {tab === "coaching"  && <CoachingView session={activeSession} />}
+          {tab === "report"    && <ReportView session={activeSession} />}
+          {tab === "iep"        && <IEPView onUsageChecked={handleUsageChecked} />}
+          {tab === "plc"        && <PLCView onUsageChecked={handleUsageChecked} />}
+          {tab === "lessonplan" && <LessonPlanView onUsageChecked={handleUsageChecked} />}
           {tab === "sessions"  && <SessionsList sessions={sessions} loading={sessionsLoading} currentUserId={user.id} onSelect={s => { setActiveSession(s); setTab("analysis"); }} onDelete={deleteSession} />}
           {tab === "organization" && <OrganizationView user={user} org={org} school={school} onOrgChange={refreshOrg} />}
-          {tab === "settings"  && <SettingsView apiKey={apiKey} onChangeKey={setApiKey} onClearSessions={clearSessions} sessionCount={sessions.length} legacyCount={legacyCount} onImportLegacy={importLegacySessions} billing={billing} onOpenPricing={() => setShowPricingIntro(true)} />}
+          {tab === "settings"  && <SettingsView onClearSessions={clearSessions} sessionCount={sessions.length} legacyCount={legacyCount} onImportLegacy={importLegacySessions} billing={billing} onOpenPricing={() => setShowPricingIntro(true)} />}
         </div>
       </div>
 
