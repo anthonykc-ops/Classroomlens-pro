@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Card, Chip, Label, Icon, RatingBar, ScoreRing } from "./ui.jsx";
 
 const landingCss = `
@@ -7,10 +8,12 @@ const landingCss = `
   .cl-land-glow-b { position: absolute; width: 480px; height: 480px; border-radius: 50%; bottom: -220px; left: -140px;
     background: radial-gradient(circle, rgba(79,70,229,0.26) 0%, rgba(79,70,229,0) 70%); }
   .cl-land-examples { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+  .cl-land-preview { display: grid; grid-template-columns: 0.85fr 1.15fr; gap: 48px; align-items: center; }
   .cl-land-features { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
   .cl-land-pricing { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
   @media (max-width: 980px) {
     .cl-land-examples { grid-template-columns: 1fr; }
+    .cl-land-preview { grid-template-columns: 1fr; }
     .cl-land-features { grid-template-columns: repeat(2, 1fr); }
     .cl-land-pricing { grid-template-columns: 1fr; }
   }
@@ -90,6 +93,244 @@ const PLC_NORMS = [
 ];
 const PLC_FLAG_COLOR = { strong: "var(--success)", watch: "var(--warning)", concern: "var(--danger)" };
 
+// Sidebar groups/items shown in the live preview mockup below — a direct copy
+// of the real app's TAB_GROUPS/TABS structure (see App.jsx) so it reads as the
+// actual navigation, not an approximation of it.
+const PREVIEW_NAV_GROUPS = [
+  { group: "Overview", items: [{ id: "dashboard", icon: "dashboard", label: "Dashboard" }] },
+  { group: "Observation", items: [
+    { id: "record", icon: "record", label: "Observe" },
+    { id: "analysis", icon: "analysis", label: "Analysis" },
+    { id: "growth", icon: "growth", label: "Growth Plan" },
+    { id: "coaching", icon: "coaching", label: "Coaching" },
+    { id: "report", icon: "report", label: "Reports" },
+  ] },
+  { group: "Tools", items: [
+    { id: "iep", icon: "iep", label: "IEP Meeting Analysis" },
+    { id: "plc", icon: "plc", label: "PLC Meeting Analyzer" },
+    { id: "lessonplan", icon: "lessonplan", label: "Lesson Plan Analyzer" },
+  ] },
+  { group: "Library", items: [{ id: "sessions", icon: "sessions", label: "Sessions" }] },
+  { group: "Account", items: [
+    { id: "organization", icon: "team", label: "Organization" },
+    { id: "settings", icon: "settings", label: "Settings" },
+  ] },
+];
+
+function MockupSidebar({ active }) {
+  return (
+    <div style={{ width: 178, flexShrink: 0, background: "var(--sidebar-bg)", padding: "12px 8px", overflowY: "auto" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 4px 14px" }}>
+        <div style={{ width: 20, height: 20, background: "linear-gradient(135deg,#4f46e5,#4338ca)", borderRadius: 5, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+          <Icon name="lens" size={11} />
+        </div>
+        <span style={{ fontSize: 9.5, fontWeight: 800, color: "#fff", letterSpacing: "-0.01em" }}>ClassroomLens</span>
+      </div>
+      {PREVIEW_NAV_GROUPS.map(g => (
+        <div key={g.group} style={{ marginBottom: 10 }}>
+          <div style={{ fontSize: 7.5, fontWeight: 700, color: "#475569", letterSpacing: "0.1em", textTransform: "uppercase", padding: "0 7px", marginBottom: 4 }}>{g.group}</div>
+          {g.items.map(item => {
+            const isActive = item.id === active;
+            return (
+              <div key={item.id} style={{
+                display: "flex", alignItems: "center", gap: 7, padding: "5px 7px", borderRadius: 5, marginBottom: 1,
+                background: isActive ? "var(--sidebar-bg-2)" : "transparent",
+                borderLeft: `2px solid ${isActive ? "#818cf8" : "transparent"}`,
+                color: isActive ? "#fff" : "var(--sidebar-text)",
+              }}>
+                <Icon name={item.icon} size={10.5} />
+                <span style={{ fontSize: 9, fontWeight: isActive ? 700 : 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{item.label}</span>
+              </div>
+            );
+          })}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// Browser-window chrome (traffic-light dots + fake address bar) wrapping the
+// mini sidebar + content pane, so each mockup reads as an actual app screenshot
+// rather than a floating content card.
+function BrowserFrame({ active, children }) {
+  return (
+    <div style={{ background: "var(--surface)", borderRadius: 12, overflow: "hidden", border: "1px solid var(--border)", boxShadow: "var(--shadow-lg)" }}>
+      <div style={{ background: "var(--surface-2)", borderBottom: "1px solid var(--border)", padding: "9px 14px", display: "flex", alignItems: "center", gap: 10 }}>
+        <div style={{ display: "flex", gap: 5, flexShrink: 0 }}>
+          <span style={{ width: 9, height: 9, borderRadius: "50%", background: "#ef4444", display: "inline-block" }} />
+          <span style={{ width: 9, height: 9, borderRadius: "50%", background: "#f59e0b", display: "inline-block" }} />
+          <span style={{ width: 9, height: 9, borderRadius: "50%", background: "#22c55e", display: "inline-block" }} />
+        </div>
+        <div style={{ flex: 1, textAlign: "center" }}>
+          <span style={{ fontSize: 10.5, color: "var(--text-5)", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 6, padding: "3px 14px" }}>
+            classroomlens.pro/app
+          </span>
+        </div>
+      </div>
+      <div style={{ display: "flex", minHeight: 440 }}>
+        <MockupSidebar active={active} />
+        <div style={{ flex: 1, minWidth: 0, background: "var(--bg)", padding: 16 }}>
+          {children}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AnalysisMockupContent() {
+  return (
+    <>
+      <div style={{ marginBottom: 12 }}>
+        <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text)" }}>Analysis</div>
+        <div style={{ fontSize: 10, color: "var(--text-4)" }}>AI-scored breakdown of the active observation</div>
+      </div>
+      <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 9, padding: 12 }}>
+        <div style={{ display: "flex", gap: 10, alignItems: "flex-start", marginBottom: 10 }}>
+          <ScoreRing value={3.1} max={4} color="#3b82f6" size={40} />
+          <div>
+            <div style={{ fontSize: 9, fontWeight: 800, color: "#3b82f6", letterSpacing: "0.05em" }}>DANIELSON FRAMEWORK</div>
+            <div style={{ fontSize: 12.5, fontWeight: 800, color: "var(--text)" }}>Ms. Rivera · 8th Grade Math</div>
+          </div>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 10 }}>
+          {DANIELSON_DOMAINS.map(d => (
+            <div key={d.dk} style={{ background: "var(--surface-2)", borderRadius: 6, padding: 7 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
+                <span style={{ fontSize: 8, fontWeight: 800, color: d.color }}>{d.dk}</span>
+                <span style={{ fontSize: 10, fontWeight: 800, color: d.color, fontFamily: "'JetBrains Mono',monospace" }}>{d.avg.toFixed(1)}</span>
+              </div>
+              <RatingBar value={d.avg} max={4} color={d.color} />
+            </div>
+          ))}
+        </div>
+        <div style={{ fontSize: 9, fontWeight: 800, color: "var(--text-4)", letterSpacing: "0.08em", marginBottom: 6 }}>EVIDENCE</div>
+        <div style={{ background: "var(--surface-2)", borderRadius: 6, padding: 8, borderLeft: "3px solid #8b5cf644" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4, gap: 6, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 9, fontWeight: 800, color: "#8b5cf6" }}>3b <span style={{ color: "var(--text-3)", fontWeight: 600 }}>Questioning & Discussion</span></span>
+            <Chip label="3" color="#8b5cf6" />
+          </div>
+          <div style={{ fontSize: 9.5, color: "var(--text-3)", background: "var(--surface)", borderRadius: 5, padding: "4px 8px", lineHeight: 1.5 }}>
+            ❝ Turn and tell your partner — what pattern do you notice in these three equations?
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function PLCMockupContent() {
+  return (
+    <>
+      <div style={{ marginBottom: 10 }}>
+        <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text)" }}>PLC Meeting Analyzer</div>
+        <div style={{ fontSize: 10, color: "var(--text-4)" }}>AI-assisted analysis of your team's meeting</div>
+      </div>
+      <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 9, padding: 10, marginBottom: 10 }}>
+        <div style={{ fontSize: 9, fontWeight: 800, color: "var(--text-4)", letterSpacing: "0.08em", marginBottom: 6 }}>MEETING NOTES</div>
+        <div style={{ background: "var(--surface-2)", border: "1px dashed var(--border-strong)", borderRadius: 6, padding: 8, fontSize: 9.5, color: "var(--text-5)", fontStyle: "italic", marginBottom: 9 }}>
+          "Team reviewed fractions pre-assessment data and discussed reteach groupings…"
+        </div>
+        <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "var(--accent)", color: "#fff", borderRadius: 6, padding: "5px 11px", fontSize: 10, fontWeight: 700 }}>
+          ⚡ Analyze Meeting
+        </div>
+      </div>
+      <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 9, padding: 10 }}>
+        <div style={{ fontSize: 9, fontWeight: 800, color: "var(--text-4)", letterSpacing: "0.08em", marginBottom: 6 }}>KEY DECISIONS</div>
+        <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+          <span style={{ color: "var(--accent)", fontWeight: 800, fontSize: 10, flexShrink: 0 }}>▸</span>
+          <span style={{ fontSize: 10, color: "var(--text-2)", lineHeight: 1.5 }}>{PLC_DECISIONS[0]}</span>
+        </div>
+        <div style={{ fontSize: 9, fontWeight: 800, color: "var(--text-4)", letterSpacing: "0.08em", marginBottom: 6 }}>ACTION ITEMS</div>
+        <div style={{ background: "var(--surface-2)", borderRadius: 6, padding: 8 }}>
+          <div style={{ fontSize: 10.5, fontWeight: 700, color: "var(--text)", marginBottom: 5 }}>{PLC_ACTIONS[0].item}</div>
+          <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+            <Chip label={`Owner: ${PLC_ACTIONS[0].owner}`} color="var(--accent)" />
+            <Chip label={PLC_ACTIONS[0].timeline} color="var(--text-4)" />
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+const DASHBOARD_STATS = [
+  { label: "Total Observations", value: "142", color: "#4f46e5" },
+  { label: "School Average", value: "3.4", color: "#16a34a" },
+  { label: "Needs Support", value: "3", color: "#d97706" },
+  { label: "Teachers Observed", value: "28", color: "#3b82f6" },
+];
+const DASHBOARD_ROWS = [
+  { teacher: "M. Rivera", framework: "Danielson", rating: 3.1 },
+  { teacher: "J. Alvarez", framework: "Marzano", rating: 3.6 },
+  { teacher: "K. Chen", framework: "TPEP", rating: 2.8 },
+  { teacher: "D. Nguyen", framework: "CEL 5D+", rating: 3.9 },
+];
+const dashboardRatingColor = r => (r >= 3.5 ? "var(--success)" : r >= 3 ? "#3b82f6" : "var(--warning)");
+
+function DashboardMockupContent() {
+  return (
+    <>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12, gap: 8 }}>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text)" }}>Dashboard</div>
+          <div style={{ fontSize: 10, color: "var(--text-4)" }}>Your observation trends at a glance</div>
+        </div>
+        <Chip label="Monthly Plan" color="var(--success)" />
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8, marginBottom: 12 }}>
+        {DASHBOARD_STATS.map(s => (
+          <div key={s.label} style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 8, padding: 8 }}>
+            <div style={{ fontSize: 16, fontWeight: 800, color: s.color }}>{s.value}</div>
+            <div style={{ fontSize: 7.5, color: "var(--text-4)", fontWeight: 700, marginTop: 3, lineHeight: 1.3 }}>{s.label}</div>
+          </div>
+        ))}
+      </div>
+      <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 9, padding: 10 }}>
+        <div style={{ fontSize: 9, fontWeight: 800, color: "var(--text-4)", letterSpacing: "0.08em", marginBottom: 8 }}>RECENT OBSERVATIONS</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr 0.6fr", fontSize: 8.5, fontWeight: 800, color: "var(--text-5)", letterSpacing: "0.05em", paddingBottom: 6, borderBottom: "1px solid var(--border)", marginBottom: 6 }}>
+          <span>TEACHER</span><span>FRAMEWORK</span><span style={{ textAlign: "right" }}>RATING</span>
+        </div>
+        {DASHBOARD_ROWS.map(r => (
+          <div key={r.teacher} style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr 0.6fr", fontSize: 10, padding: "5px 0", alignItems: "center" }}>
+            <span style={{ fontWeight: 700, color: "var(--text)" }}>{r.teacher}</span>
+            <span style={{ color: "var(--text-4)" }}>{r.framework}</span>
+            <span style={{ textAlign: "right", fontWeight: 800, color: dashboardRatingColor(r.rating) }}>{r.rating.toFixed(1)}</span>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
+function GrowthPlanMockupContent() {
+  return (
+    <>
+      <div style={{ marginBottom: 12 }}>
+        <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text)" }}>Growth Plan</div>
+        <div style={{ fontSize: 10, color: "var(--text-4)" }}>Actionable next steps from the active observation</div>
+      </div>
+      <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 9, padding: 12 }}>
+        {GROWTH_PLAN.map(g => (
+          <div key={g.label} style={{ marginBottom: 12 }}>
+            <div style={{ fontSize: 11, fontWeight: 800, color: g.color, marginBottom: 6 }}>{g.label}</div>
+            <div style={{ display: "flex", gap: 7, background: "var(--surface-2)", borderRadius: 6, padding: "8px 10px" }}>
+              <span style={{ color: g.color, fontWeight: 800, flexShrink: 0, fontSize: 10 }}>▸</span>
+              <span style={{ fontSize: 10.5, color: "var(--text-2)", lineHeight: 1.55 }}>{g.text}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
+const PREVIEW_TABS = [
+  { id: "dashboard", label: "Dashboard", content: <DashboardMockupContent /> },
+  { id: "analysis", label: "Observation Analysis", content: <AnalysisMockupContent /> },
+  { id: "growth", label: "Growth Plan", content: <GrowthPlanMockupContent /> },
+  { id: "plc", label: "PLC Meeting", content: <PLCMockupContent /> },
+];
+
 const PRICING = [
   {
     name: "Monthly", price: "$9.99", period: "/ month", desc: "For teachers and independent coaches",
@@ -111,6 +352,8 @@ const PRICING = [
 export function LandingPage({ isLoggedIn }) {
   const appHref = "/app";
   const heroCta = isLoggedIn ? "Go to Dashboard" : "Get Started";
+  const [previewTab, setPreviewTab] = useState("dashboard");
+  const activePreview = PREVIEW_TABS.find(t => t.id === previewTab) || PREVIEW_TABS[0];
 
   return (
     <div style={{ background: "var(--bg)", minHeight: "100vh" }}>
@@ -122,7 +365,7 @@ export function LandingPage({ isLoggedIn }) {
           <LogoMark />
           <div style={{ display: "flex", alignItems: "center", gap: 24 }}>
             <div style={{ display: "flex", gap: 20 }} className="cl-land-navlinks">
-              <a href="#examples" style={{ fontSize: 13, fontWeight: 600, color: "var(--text-3)", textDecoration: "none" }}>Examples</a>
+              <a href="#screenshots" style={{ fontSize: 13, fontWeight: 600, color: "var(--text-3)", textDecoration: "none" }}>Examples</a>
               <a href="#features" style={{ fontSize: 13, fontWeight: 600, color: "var(--text-3)", textDecoration: "none" }}>Features</a>
               <a href="#pricing" style={{ fontSize: 13, fontWeight: 600, color: "var(--text-3)", textDecoration: "none" }}>Pricing</a>
             </div>
@@ -142,8 +385,8 @@ export function LandingPage({ isLoggedIn }) {
           <div style={{ display: "inline-block", fontSize: 11, fontWeight: 800, letterSpacing: "0.14em", color: "#818cf8", background: "rgba(129,140,248,0.14)", border: "1px solid rgba(129,140,248,0.28)", borderRadius: 999, padding: "6px 14px", marginBottom: 22 }}>
             AI-POWERED OBSERVATION PLATFORM
           </div>
-          <h1 style={{ fontSize: 48, fontWeight: 800, lineHeight: 1.12, letterSpacing: "-0.02em", color: "#fff", marginBottom: 20 }}>
-            Observation reports in minutes,<br />not hours.
+          <h1 style={{ fontSize: 44, fontWeight: 800, lineHeight: 1.2, letterSpacing: "-0.02em", color: "#fff", marginBottom: 20 }}>
+            Real-time AI feedback on your observations, lesson plans, IEP meetings, and PLC meetings — for teachers and administrators who want to grow.
           </h1>
           <p style={{ fontSize: 17, color: "var(--sidebar-text)", lineHeight: 1.7, maxWidth: 560, margin: "0 auto 34px" }}>
             Record any lesson and get evidence-mapped ratings, growth plans, and formal reports —
@@ -151,20 +394,58 @@ export function LandingPage({ isLoggedIn }) {
           </p>
           <div style={{ display: "flex", gap: 12, justifyContent: "center", flexWrap: "wrap", marginBottom: 18 }}>
             <CTAButton href={appHref} variant="onDark">{heroCta} →</CTAButton>
-            <CTAButton href="#examples" variant="onDarkOutline">See How It Works</CTAButton>
+            <CTAButton href="#screenshots" variant="onDarkOutline">See How It Works</CTAButton>
           </div>
           <p style={{ fontSize: 12, color: "var(--sidebar-text)" }}>See real sample output below · Simple flat-rate pricing</p>
+        </div>
+      </div>
+
+      {/* Live interactive app preview — split screen, marketing copy left, real
+          app mockup right. Switching tabs swaps the mockup content and the
+          active sidebar highlight together, so it reads as one live app. */}
+      <div id="screenshots" style={{ maxWidth: 1180, margin: "0 auto", padding: "88px 24px 20px" }}>
+        <div className="cl-land-preview">
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.12em", color: "var(--accent)", marginBottom: 12 }}>SEE IT IN ACTION</div>
+            <h2 style={{ fontSize: 30, fontWeight: 800, color: "var(--text)", letterSpacing: "-0.01em", marginBottom: 14, lineHeight: 1.25 }}>
+              The exact dashboard your team will use
+            </h2>
+            <p style={{ fontSize: 14, color: "var(--text-4)", lineHeight: 1.75, marginBottom: 24 }}>
+              Every screen on the right is built from the same layout, sidebar, and components live in
+              the app — not a redesign for marketing, just the real thing. Click a tab to explore.
+            </p>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {PREVIEW_TABS.map(t => (
+                <button key={t.id} onClick={() => setPreviewTab(t.id)}
+                  style={{
+                    textAlign: "left", display: "flex", alignItems: "center", justifyContent: "space-between",
+                    background: previewTab === t.id ? "var(--accent-soft)" : "var(--surface)",
+                    border: `1.5px solid ${previewTab === t.id ? "var(--accent)" : "var(--border-strong)"}`,
+                    borderRadius: 10, padding: "13px 16px", cursor: "pointer", fontFamily: "inherit",
+                    color: previewTab === t.id ? "var(--accent)" : "var(--text-2)",
+                    fontSize: 13.5, fontWeight: 700, transition: "all .15s",
+                  }}>
+                  {t.label}
+                  <span style={{ opacity: previewTab === t.id ? 1 : 0 }}>→</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <BrowserFrame active={activePreview.id}>{activePreview.content}</BrowserFrame>
+          </div>
         </div>
       </div>
 
       {/* Live example infographics */}
       <div id="examples" style={{ maxWidth: 1140, margin: "0 auto", padding: "88px 24px 20px" }}>
         <div style={{ textAlign: "center", maxWidth: 620, margin: "0 auto 44px" }}>
-          <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.12em", color: "var(--accent)", marginBottom: 12 }}>SEE IT IN ACTION</div>
+          <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.12em", color: "var(--accent)", marginBottom: 12 }}>SAMPLE OUTPUT</div>
           <h2 style={{ fontSize: 30, fontWeight: 800, color: "var(--text)", letterSpacing: "-0.01em", marginBottom: 12 }}>Real output, not a mockup</h2>
           <p style={{ fontSize: 14, color: "var(--text-4)", lineHeight: 1.7 }}>
-            These are illustrative samples built from the exact same components the live app renders —
-            not screenshots, but not fiction either.
+            A closer look at the actual output quality — illustrative samples built from the exact
+            same components the live app renders, not fiction.
           </p>
         </div>
 
