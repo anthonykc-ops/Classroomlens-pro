@@ -26,12 +26,15 @@ export async function getBillingAccount(userId) {
 // Not security-sensitive — just prevents the pricing intro from nagging on every
 // login — so it lives in localStorage rather than needing a write endpoint against
 // a table the client otherwise has zero write access to.
+// Keyed per-user: the same browser can see multiple accounts sign in/out (shared
+// devices, testing), and a dismissal by one account must not suppress the intro
+// for another account that has never seen it.
 const PRICING_SEEN_KEY = "classroomlens_pricing_intro_seen";
-export function hasSeenPricingIntro() {
-  return localStorage.getItem(PRICING_SEEN_KEY) === "1";
+export function hasSeenPricingIntro(userId) {
+  return localStorage.getItem(`${PRICING_SEEN_KEY}_${userId}`) === "1";
 }
-export function markPricingIntroSeen() {
-  localStorage.setItem(PRICING_SEEN_KEY, "1");
+export function markPricingIntroSeen(userId) {
+  localStorage.setItem(`${PRICING_SEEN_KEY}_${userId}`, "1");
 }
 
 export async function startCheckout(plan) {

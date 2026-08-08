@@ -3082,10 +3082,10 @@ export default function App() {
   // Show the "choose a plan" intro once per browser, only for trial users, and
   // only after we actually know their billing state (avoids a flash on load).
   useEffect(() => {
-    if (billing && billing.plan === "trial" && !hasSeenPricingIntro()) {
+    if (billing && billing.plan === "trial" && user && !hasSeenPricingIntro(user.id)) {
       setShowPricingIntro(true);
     }
-  }, [billing]);
+  }, [billing, user]);
 
   // Returning from Stripe Checkout — the webhook usually lands before this redirect
   // completes, but give it a moment before refreshing so the plan shows correctly.
@@ -3358,7 +3358,7 @@ export default function App() {
         <PricingView
           mode="intro"
           freeUsed={billing?.free_observations_used || 0}
-          onDismiss={() => { markPricingIntroSeen(); setShowPricingIntro(false); }}
+          onDismiss={() => { markPricingIntroSeen(user.id); setShowPricingIntro(false); }}
         />
       )}
       {showPaywall && (
