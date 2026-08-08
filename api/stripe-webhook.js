@@ -71,6 +71,25 @@ async function updateBilling({ match, patch, context, eventType, sessionId, user
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).end();
 
+  // TEMP DIAGNOSTIC — remove once webhook_debug_log is confirmed writable.
+  // Runs before Stripe signature verification so it isolates the Supabase
+  // connection/service-role-key from anything Stripe-related: if this insert
+  // fails or never appears in webhook_debug_log, the problem is
+  // SUPABASE_SERVICE_ROLE_KEY / SUPABASE_URL / table grants, not the webhook logic.
+  try {
+    const { error } = await supabaseAdmin.from("webhook_debug_log").insert({
+      stage: "connectivity_test",
+      detail: { at: new Date().toISOString() },
+    });
+    if (error) {
+      console.error("DIAGNOSTIC: webhook_debug_log insert failed:", error.message, error);
+    } else {
+      console.log("DIAGNOSTIC: webhook_debug_log insert succeeded");
+    }
+  } catch (e) {
+    console.error("DIAGNOSTIC: webhook_debug_log insert threw:", e.message, e);
+  }
+
   let event;
   try {
     const rawBody = await buffer(req);
