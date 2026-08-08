@@ -20,7 +20,10 @@ export default async function handler(req, res) {
   let event;
   try {
     const rawBody = await buffer(req);
-    event = stripe.webhooks.constructEvent(rawBody, req.headers["stripe-signature"], process.env.STRIPE_WEBHOOK_SECRET);
+    // Trimmed defensively — a Vercel dashboard paste can pick up a trailing
+    // newline/space, which constructEvent treats as part of the secret and
+    // fails signature verification against Stripe's actual value.
+    event = stripe.webhooks.constructEvent(rawBody, req.headers["stripe-signature"], process.env.STRIPE_WEBHOOK_SECRET?.trim());
   } catch (err) {
     console.error("Webhook signature verification failed:", err.message);
     return res.status(400).send(`Webhook Error: ${err.message}`);
