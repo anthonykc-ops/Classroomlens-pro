@@ -14,6 +14,23 @@ function buffer(readable) {
   });
 }
 
+// TEMP DIAGNOSTIC — if req's stream already ended before this handler
+// attached its 'data'/'end' listeners (e.g. something upstream already
+// drained it despite `config.api.bodyParser = false`), buffer(req) never
+// resolves or rejects: it just hangs until Vercel kills the invocation on
+// its own timeout, producing zero logs and no error to catch. Racing it
+// against a short timeout turns that silent hang into a diagnosed,
+// logged failure instead.
+function withTimeout(promise, ms, label) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+    promise.then(
+      v => { clearTimeout(timer); resolve(v); },
+      e => { clearTimeout(timer); reject(e); },
+    );
+  });
+}
+
 // Vercel's free-plan log retention is too short to catch a failure after
 // the fact, so every outcome also gets written to the webhook_debug_log
 // table (see supabase/schema.sql) — durable, queryable any time from the
@@ -90,35 +107,73 @@ export default async function handler(req, res) {
     console.error("DIAGNOSTIC: webhook_debug_log insert threw:", e.message, e);
   }
 
+  // TEMP DIAGNOSTIC — captures the actual shape of `req` at runtime before
+  // touching it as a stream. If Vercel (or something in front of this
+  // function) already parsed the body into req.body despite
+  // `config.api.bodyParser = false`, or if req isn't a Node stream with a
+  // working `.on()` at all, this shows it directly instead of us inferring
+  // it from buffer(req) hanging with no error.
+  console.log("DIAGNOSTIC req shape:", {
+    reqBodyAlreadyPopulated: req.body !== undefined,
+    reqBodyType: typeof req.body,
+    hasOnMethod: typeof req.on === "function",
+    readable: req.readable,
+    complete: req.complete,
+    contentLength: req.headers["content-length"],
+  });
+  await logDebug("req_shape_check", {
+    detail: {
+      req_body_already_populated: req.body !== undefined,
+      req_body_type: typeof req.body,
+      has_on_method: typeof req.on === "function",
+      readable: req.readable,
+      complete: req.complete,
+      content_length: req.headers["content-length"],
+    },
+  });
+
+  // TEMP DIAGNOSTIC — reading the raw body and verifying the signature are
+  // split into separate try/catches so a failure/timeout in one isn't
+  // mislabeled as the other in webhook_debug_log. A timeout here (8s,
+  // comfortably inside Vercel's function limit) turns a silent hang — the
+  // previous symptom, with zero logs and no thrown error — into a logged,
+  // diagnosable failure.
+  let rawBody;
+  try {
+    rawBody = await withTimeout(buffer(req), 8000, "Reading raw request body");
+  } catch (err) {
+    console.error("Reading raw request body failed:", err.message);
+    await logDebug("raw_body_read_failed", { detail: { error: err.message } });
+    return res.status(400).send(`Webhook Error: ${err.message}`);
+  }
+
+  // TEMP DIAGNOSTIC — proves the raw request actually reached this function
+  // and what it looked like, independent of whether signature verification
+  // passes. Stripe's webhook signature is
+  // HMAC-SHA256(secret, timestamp + "." + raw_body_bytes) — a hash over
+  // literal bytes, not parsed JSON — so it has no dependency on the
+  // payload's API version/shape. A version mismatch on the webhook
+  // destination cannot by itself cause constructEvent to reject a
+  // correctly-signed request; this log rules out "the request never
+  // arrived, or arrived empty/malformed" as a separate possibility. Body
+  // isn't logged in full (may contain customer PII); length plus header
+  // presence is enough to confirm real, non-empty content arrived.
+  console.log("DIAGNOSTIC raw request pre-verification:", {
+    bodyLength: rawBody.length,
+    hasSignatureHeader: !!req.headers["stripe-signature"],
+    signatureHeaderPreview: req.headers["stripe-signature"]?.slice(0, 20),
+    contentType: req.headers["content-type"],
+  });
+  await logDebug("raw_body_received", {
+    detail: {
+      body_length: rawBody.length,
+      has_signature_header: !!req.headers["stripe-signature"],
+      content_type: req.headers["content-type"],
+    },
+  });
+
   let event;
   try {
-    const rawBody = await buffer(req);
-
-    // TEMP DIAGNOSTIC — proves the raw request actually reached this
-    // function and what it looked like, independent of whether signature
-    // verification passes. Stripe's webhook signature is
-    // HMAC-SHA256(secret, timestamp + "." + raw_body_bytes) — a hash over
-    // literal bytes, not parsed JSON — so it has no dependency on the
-    // payload's API version/shape. A version mismatch on the webhook
-    // destination cannot by itself cause constructEvent to reject a
-    // correctly-signed request; this log rules out "the request never
-    // arrived, or arrived empty/malformed" as a separate possibility.
-    // Body isn't logged in full (may contain customer PII); length plus
-    // header presence is enough to confirm real, non-empty content arrived.
-    console.log("DIAGNOSTIC raw request pre-verification:", {
-      bodyLength: rawBody.length,
-      hasSignatureHeader: !!req.headers["stripe-signature"],
-      signatureHeaderPreview: req.headers["stripe-signature"]?.slice(0, 20),
-      contentType: req.headers["content-type"],
-    });
-    await logDebug("raw_body_received", {
-      detail: {
-        body_length: rawBody.length,
-        has_signature_header: !!req.headers["stripe-signature"],
-        content_type: req.headers["content-type"],
-      },
-    });
-
     // Trimmed defensively — a Vercel dashboard paste can pick up a trailing
     // newline/space, which constructEvent treats as part of the secret and
     // fails signature verification against Stripe's actual value.
