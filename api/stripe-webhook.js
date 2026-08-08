@@ -99,8 +99,23 @@ export default async function handler(req, res) {
     event = stripe.webhooks.constructEvent(rawBody, req.headers["stripe-signature"], process.env.STRIPE_WEBHOOK_SECRET?.trim());
   } catch (err) {
     console.error("Webhook signature verification failed:", err.message);
+    // TEMP DIAGNOSTIC — a failure here means the switch below is never
+    // reached at all. Previously only console.error'd, which Vercel's free
+    // plan doesn't retain long enough to check after the fact — persisting
+    // it means a signature-verification failure is distinguishable from
+    // "reached the switch but didn't match" purely by looking at Supabase.
+    await logDebug("signature_verification_failed", { detail: { error: err.message } });
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
+
+  // TEMP DIAGNOSTIC — records the literal event.type Stripe sent for every
+  // event that passes signature verification, regardless of whether the
+  // switch below has a matching case. This settles whether
+  // "checkout.session.completed" handling is being skipped because the
+  // event never arrives as that type (e.g. the Stripe dashboard endpoint
+  // isn't subscribed to it, or test payments emit something else) versus a
+  // matching bug in the switch itself.
+  await logDebug("event_received", { event_type: event.type, detail: { event_id: event.id } });
 
   try {
     switch (event.type) {
