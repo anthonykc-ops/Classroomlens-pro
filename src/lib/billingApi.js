@@ -12,29 +12,19 @@ export async function getBillingAccount(userId) {
   return data;
 }
 
-// Not security-sensitive — just prevents the pricing intro from nagging on every
-// login — so it lives in localStorage rather than needing a write endpoint against
-// a table the client otherwise has zero write access to.
-// Keyed per-user: the same browser can see multiple accounts sign in/out (shared
-// devices, testing), and a dismissal by one account must not suppress the intro
-// for another account that has never seen it.
-const PRICING_SEEN_KEY = "classroomlens_pricing_intro_seen";
-export function hasSeenPricingIntro(userId) {
-  return localStorage.getItem(`${PRICING_SEEN_KEY}_${userId}`) === "1";
-}
-export function markPricingIntroSeen(userId) {
-  localStorage.setItem(`${PRICING_SEEN_KEY}_${userId}`, "1");
-}
-
 export async function startCheckout(plan) {
   const { ok, data } = await authedFetch("/api/create-checkout-session", { plan });
   if (!ok || !data.url) throw new Error(data.error || "Could not start checkout.");
   window.location.href = data.url;
 }
 
-// $0 today — just saves a card so the free trial can continue past observation #1.
-export async function startCardSetup() {
-  return startCheckout("card_setup");
+// Called from the /app?checkout=success redirect to activate the plan
+// immediately via the Stripe API, instead of waiting on the webhook to land
+// first (see api/verify-checkout-session.js).
+export async function verifyCheckoutSession(sessionId) {
+  const { ok, data } = await authedFetch("/api/verify-checkout-session", { sessionId });
+  if (!ok) throw new Error(data.error || "Could not verify checkout session.");
+  return data.billing;
 }
 
 export async function openBillingPortal() {
@@ -47,8 +37,9 @@ export async function openBillingPortal() {
 // structured result on both success and a 402 response, so the caller can
 // branch on `allowed`/`reason` instead of catching an exception for the
 // expected/common case; only genuine errors (network, 401, 500) throw.
-// reason is "card_required" (observation 2-3, no card on file yet) or
-// "trial_exhausted" (all 3 free observations used) when allowed is false.
+// reason is "no_active_plan" when allowed is false (no free trial anymore —
+// the frontend also blocks all app access behind plan selection, but this
+// is the real server-side check, e.g. for a subscription canceled mid-session).
 export async function checkObservationAllowance() {
   const { ok, status, data } = await authedFetch("/api/track-observation", {});
   if (status === 402) return data;

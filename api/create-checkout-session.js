@@ -2,14 +2,11 @@ import { stripe } from "./_lib/stripeClient.js";
 import { supabaseAdmin } from "./_lib/supabaseAdmin.js";
 import { getAuthedUser } from "./_lib/getAuthedUser.js";
 
-// Only the Pay-As-You-Go BASE fee and the Unlimited plan are sold through
-// Checkout. PAYG's metered usage subscription has nothing due today, so it's
-// created directly via the API from the webhook once the base fee succeeds —
-// see stripe-webhook.js. (Stripe subscriptions can't mix billing intervals,
-// so PAYG is two subscriptions under one customer, not one.)
+// Two simple flat-rate plans, both sold directly through Checkout — no more
+// PAYG base+metered split subscription, no more $0 card-setup session.
 const PRICE_IDS = {
-  payg: process.env.STRIPE_PRICE_PAYG_BASE,
-  unlimited: process.env.STRIPE_PRICE_UNLIMITED,
+  monthly: process.env.STRIPE_PRICE_MONTHLY,
+  annual: process.env.STRIPE_PRICE_ANNUAL,
 };
 
 export default async function handler(req, res) {
@@ -20,8 +17,7 @@ export default async function handler(req, res) {
     if (!user) return res.status(401).json({ error: "Not authenticated" });
 
     const { plan } = req.body || {};
-    const isCardSetup = plan === "card_setup";
-    if (!isCardSetup && !PRICE_IDS[plan]) return res.status(400).json({ error: "Invalid plan" });
+    if (!PRICE_IDS[plan]) return res.status(400).json({ error: "Invalid plan" });
 
     const { data: billing } = await supabaseAdmin
       .from("billing_accounts")
@@ -43,26 +39,20 @@ export default async function handler(req, res) {
 
     const origin = req.headers.origin || `https://${req.headers.host}`;
 
-    // "card_setup" collects a payment method with nothing charged today — this
-    // is what unlocks observations 2-3 of the free trial. Choosing an actual
-    // plan (payg/unlimited) always goes through normal subscription Checkout.
-    const session = isCardSetup
-      ? await stripe.checkout.sessions.create({
-          mode: "setup",
-          customer: customerId,
-          success_url: `${origin}/app?checkout=card-added`,
-          cancel_url: `${origin}/app?checkout=cancelled`,
-          metadata: { supabase_user_id: user.id, plan: "card_setup" },
-        })
-      : await stripe.checkout.sessions.create({
-          mode: "subscription",
-          customer: customerId,
-          line_items: [{ price: PRICE_IDS[plan], quantity: 1 }],
-          success_url: `${origin}/app?checkout=success`,
-          cancel_url: `${origin}/app?checkout=cancelled`,
-          metadata: { supabase_user_id: user.id, plan },
-          subscription_data: { metadata: { supabase_user_id: user.id, plan } },
-        });
+    // {CHECKOUT_SESSION_ID} lets the success redirect verify payment directly
+    // via the Stripe API (see api/verify-checkout-session.js) instead of
+    // waiting on the webhook for the user-facing activation moment. The
+    // webhook still runs too, as the authoritative record and to handle
+    // renewals/cancellations, which have no redirect to hook into.
+    const session = await stripe.checkout.sessions.create({
+      mode: "subscription",
+      customer: customerId,
+      line_items: [{ price: PRICE_IDS[plan], quantity: 1 }],
+      success_url: `${origin}/app?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${origin}/app?checkout=cancelled`,
+      metadata: { supabase_user_id: user.id, plan },
+      subscription_data: { metadata: { supabase_user_id: user.id, plan } },
+    });
 
     return res.status(200).json({ url: session.url });
   } catch (e) {

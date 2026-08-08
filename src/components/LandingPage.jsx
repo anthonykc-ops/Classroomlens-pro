@@ -92,25 +92,25 @@ const PLC_FLAG_COLOR = { strong: "var(--success)", watch: "var(--warning)", conc
 
 const PRICING = [
   {
-    name: "Pay As You Go", price: "$19.99", period: "/ year + $1.00 / observation", desc: "For teachers and independent coaches who observe occasionally",
-    features: ["All 5 evaluation frameworks", "AI analysis & growth plans", "IEP & PLC meeting tools", "Billed monthly for what you actually use"],
-    cta: "Start Free Trial", variant: "outline", highlight: false,
+    name: "Monthly", price: "$9.99", period: "/ month", desc: "For teachers and independent coaches",
+    features: ["All 5 evaluation frameworks", "AI analysis & growth plans", "IEP & PLC meeting tools", "Unlimited observations"],
+    cta: "Get Started", variant: "outline", highlight: false,
   },
   {
-    name: "Unlimited", price: "$39.99", period: "/ year, unlimited observations", desc: "For principals and instructional leaders",
-    features: ["Everything in Pay As You Go", "Unlimited observations, no metering", "School-wide admin dashboard", "Priority support"],
-    cta: "Start Free Trial", variant: "primary", highlight: true,
+    name: "Annual", price: "$59.99", period: "/ year — save 50%", desc: "For principals and instructional leaders",
+    features: ["Everything in Monthly", "Unlimited observations", "School-wide admin dashboard", "Priority support"],
+    cta: "Get Started", variant: "primary", highlight: true,
   },
   {
     name: "District", price: "Custom", period: "", desc: "For multi-school districts",
-    features: ["Everything in Unlimited", "Multiple school sites", "District-wide reporting", "Dedicated onboarding", "Custom contract terms"],
-    cta: "Contact Us", variant: "outline", highlight: false, href: "mailto:anthonykc@gmail.com",
+    features: ["Everything in Annual", "Multiple school sites", "District-wide reporting", "Dedicated onboarding", "Custom contract terms"],
+    cta: "Customer Support", variant: "outline", highlight: false, href: "mailto:support@classroomlens.com?subject=District%20Plan%20Inquiry",
   },
 ];
 
 export function LandingPage({ isLoggedIn }) {
   const appHref = "/app";
-  const heroCta = isLoggedIn ? "Go to Dashboard" : "Start Free Trial";
+  const heroCta = isLoggedIn ? "Go to Dashboard" : "Get Started";
 
   return (
     <div style={{ background: "var(--bg)", minHeight: "100vh" }}>
@@ -128,7 +128,7 @@ export function LandingPage({ isLoggedIn }) {
             </div>
             <div style={{ display: "flex", gap: 10 }}>
               <CTAButton href={appHref} variant="outline" size="md">{isLoggedIn ? "Dashboard" : "Sign In"}</CTAButton>
-              {!isLoggedIn && <CTAButton href={appHref} variant="primary" size="md">Start Free Trial</CTAButton>}
+              {!isLoggedIn && <CTAButton href={appHref} variant="primary" size="md">Get Started</CTAButton>}
             </div>
           </div>
         </div>
@@ -153,7 +153,7 @@ export function LandingPage({ isLoggedIn }) {
             <CTAButton href={appHref} variant="onDark">{heroCta} →</CTAButton>
             <CTAButton href="#examples" variant="onDarkOutline">See How It Works</CTAButton>
           </div>
-          <p style={{ fontSize: 12, color: "var(--sidebar-text)" }}>First observation free · No card required to start</p>
+          <p style={{ fontSize: 12, color: "var(--sidebar-text)" }}>See real sample output below · Simple flat-rate pricing</p>
         </div>
       </div>
 
@@ -280,7 +280,7 @@ export function LandingPage({ isLoggedIn }) {
         <div style={{ textAlign: "center", maxWidth: 560, margin: "0 auto 44px" }}>
           <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.12em", color: "var(--accent)", marginBottom: 12 }}>PRICING</div>
           <h2 style={{ fontSize: 30, fontWeight: 800, color: "var(--text)", letterSpacing: "-0.01em", marginBottom: 12 }}>Simple pricing, built to scale with you</h2>
-          <p style={{ fontSize: 14, color: "var(--text-4)" }}>Your first observation is free, no card required. Add a card afterward (not charged) to keep your remaining 2 free.</p>
+          <p style={{ fontSize: 14, color: "var(--text-4)" }}>No metering, no per-observation fees — just two simple flat-rate plans.</p>
         </div>
         <div className="cl-land-pricing">
           {PRICING.map(p => (
@@ -315,8 +315,8 @@ export function LandingPage({ isLoggedIn }) {
       <div style={{ background: "var(--sidebar-bg)", marginTop: 100, position: "relative", overflow: "hidden" }}>
         <div className="cl-land-glow-a" />
         <div style={{ position: "relative", maxWidth: 620, margin: "0 auto", padding: "72px 24px", textAlign: "center" }}>
-          <h2 style={{ fontSize: 28, fontWeight: 800, color: "#fff", letterSpacing: "-0.01em", marginBottom: 14 }}>Try your first observation free</h2>
-          <p style={{ fontSize: 14, color: "var(--sidebar-text)", marginBottom: 28 }}>No credit card required. Set up your first observation in under five minutes.</p>
+          <h2 style={{ fontSize: 28, fontWeight: 800, color: "#fff", letterSpacing: "-0.01em", marginBottom: 14 }}>Ready to get started?</h2>
+          <p style={{ fontSize: 14, color: "var(--sidebar-text)", marginBottom: 28 }}>Choose a plan and set up your first observation in under five minutes.</p>
           <CTAButton href={appHref} variant="onDark">{heroCta} →</CTAButton>
         </div>
       </div>
@@ -326,7 +326,7 @@ export function LandingPage({ isLoggedIn }) {
         <LogoMark />
         <div style={{ display: "flex", gap: 20, alignItems: "center", flexWrap: "wrap" }}>
           <span style={{ fontSize: 12, color: "var(--text-5)" }}>© 2025 ClassroomLens Pro</span>
-          <a href="mailto:anthonykc@gmail.com" style={{ fontSize: 12, color: "var(--accent)" }}>anthonykc@gmail.com</a>
+          <a href="mailto:support@classroomlens.com" style={{ fontSize: 12, color: "var(--accent)" }}>Customer Support</a>
           <a href={appHref} style={{ fontSize: 12, color: "var(--text-4)" }}>Sign In</a>
         </div>
       </div>

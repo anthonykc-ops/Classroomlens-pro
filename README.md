@@ -98,7 +98,7 @@ The app opens automatically at: **http://localhost:3000**. Create an account
 | 🗣️ PLC Meeting Analyzer | Analyze PLC meetings for decisions, action items, collaborative inquiry, and norms adherence |
 | 📄 Lesson Plan Analyzer | Paste, upload, or record a lesson-plan walkthrough for framework-mapped feedback |
 | 📁 Session Storage | Synced to your account in the cloud — available on any device you log into |
-| 💳 Billing (Stripe) | 3 free observations, then Pay As You Go ($19.99/yr + $1/observation) or Unlimited ($39.99/yr) |
+| 💳 Billing (Stripe) | Flat-rate plans, no free trial — Monthly ($9.99/mo) or Annual ($59.99/yr, save 50%) |
 | ⚙️ Settings | Update API key, manage data, manage subscription |
 
 *IEP, PLC, and Lesson Plan analyses are stateless — nothing from those three tools is saved to your account.*
@@ -114,7 +114,7 @@ The app opens automatically at: **http://localhost:3000**. Create an account
 4. Follow the prompts
 5. Add your environment variables — Vercel project → Settings → Environment Variables:
    - `VITE_ANTHROPIC_API_KEY`, `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` (frontend)
-   - `STRIPE_SECRET_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `STRIPE_PRICE_PAYG_BASE`, `STRIPE_PRICE_PAYG_METERED`, `STRIPE_PRICE_UNLIMITED`, `STRIPE_WEBHOOK_SECRET` (billing — see `.env.example` for the full Stripe setup walkthrough)
+   - `STRIPE_SECRET_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `STRIPE_PRICE_MONTHLY`, `STRIPE_PRICE_ANNUAL`, `STRIPE_WEBHOOK_SECRET` (billing — see `.env.example` for the full Stripe setup walkthrough)
 
 Your app will be live at a URL like: `https://classroomlens-pro.vercel.app`
 
@@ -150,7 +150,7 @@ Billing runs through Vercel Serverless Functions in `/api` — these only execut
 
 ## 📬 Support
 
-Questions or feedback: **anthonykc@gmail.com**
+Questions or feedback: **support@classroomlens.com**
 
 ---
 
@@ -158,7 +158,7 @@ Questions or feedback: **anthonykc@gmail.com**
 
 - [x] User accounts and cloud sync
 - [x] Organization/school roles for true cross-teacher admin dashboards
-- [x] Subscription billing (Stripe) — Pay As You Go and Unlimited plans
+- [x] Subscription billing (Stripe) — flat-rate Monthly and Annual plans
 - [ ] PDF export for formal evaluations
 - [ ] Multi-school district dashboard
 - [ ] Custom framework builder

@@ -394,3 +394,25 @@ create table if not exists public.webhook_debug_log (
 alter table public.webhook_debug_log enable row level security;
 
 alter table public.billing_accounts add column if not exists has_payment_method boolean not null default false;
+
+-- ─────────────────────────────────────────────────────────────────
+-- ClassroomLens Pro — Flat-rate pricing migration
+--
+-- Replaced Pay-As-You-Go (metered) + Unlimited with two flat-rate plans:
+-- monthly ($9.99/mo) and annual ($59.99/yr). No free trial anymore — every
+-- new account starts at 'trial' (meaning "no plan chosen yet") and the app
+-- gates all access behind plan selection immediately, rather than metering
+-- observations. The old PAYG/metered/unlimited Stripe id columns are left
+-- in place (unused) rather than dropped, since dropping columns is a
+-- destructive migration with no benefit here — existing rows just carry
+-- stale values in columns nothing reads anymore.
+-- ─────────────────────────────────────────────────────────────────
+
+-- `not valid` deliberately skips validating existing rows (some test
+-- accounts still carry 'payg'/'unlimited' from before this migration) —
+-- validating them would abort this whole migration on data nothing reads
+-- anymore. New/future writes are still checked against the new list.
+alter table public.billing_accounts drop constraint if exists billing_accounts_plan_check;
+alter table public.billing_accounts add constraint billing_accounts_plan_check check (plan in ('trial','monthly','annual')) not valid;
+
+alter table public.billing_accounts add column if not exists stripe_subscription_id text; -- monthly or annual subscription
