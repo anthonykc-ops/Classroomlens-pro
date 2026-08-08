@@ -66,7 +66,15 @@ async function updateBilling({ match, patch, context, eventType, sessionId, user
   return data;
 }
 
-export async function POST(request) {
+// This project has no framework (plain Vite + standalone /api functions),
+// and Vercel's own quickstart documents a different Web API convention for
+// that case than for Next.js: a default-exported object with a `fetch`
+// method, not a named `export async function POST(request)` (that's the
+// Next.js App Router route.js convention specifically). Using the wrong one
+// here is the likely reason the previous rewrite's deployment never took
+// over from the prior build.
+export default {
+async fetch(request) {
   // TEMP DIAGNOSTIC — remove once webhook_debug_log is confirmed writable.
   // Runs before Stripe signature verification so it isolates the Supabase
   // connection/service-role-key from anything Stripe-related: if this insert
@@ -278,4 +286,5 @@ export async function POST(request) {
     console.error("Webhook handler error for event", event.type, e);
     return Response.json({ received: true, warning: "handler error logged" });
   }
-}
+},
+};
