@@ -93,6 +93,32 @@ export default async function handler(req, res) {
   let event;
   try {
     const rawBody = await buffer(req);
+
+    // TEMP DIAGNOSTIC — proves the raw request actually reached this
+    // function and what it looked like, independent of whether signature
+    // verification passes. Stripe's webhook signature is
+    // HMAC-SHA256(secret, timestamp + "." + raw_body_bytes) — a hash over
+    // literal bytes, not parsed JSON — so it has no dependency on the
+    // payload's API version/shape. A version mismatch on the webhook
+    // destination cannot by itself cause constructEvent to reject a
+    // correctly-signed request; this log rules out "the request never
+    // arrived, or arrived empty/malformed" as a separate possibility.
+    // Body isn't logged in full (may contain customer PII); length plus
+    // header presence is enough to confirm real, non-empty content arrived.
+    console.log("DIAGNOSTIC raw request pre-verification:", {
+      bodyLength: rawBody.length,
+      hasSignatureHeader: !!req.headers["stripe-signature"],
+      signatureHeaderPreview: req.headers["stripe-signature"]?.slice(0, 20),
+      contentType: req.headers["content-type"],
+    });
+    await logDebug("raw_body_received", {
+      detail: {
+        body_length: rawBody.length,
+        has_signature_header: !!req.headers["stripe-signature"],
+        content_type: req.headers["content-type"],
+      },
+    });
+
     // Trimmed defensively — a Vercel dashboard paste can pick up a trailing
     // newline/space, which constructEvent treats as part of the secret and
     // fails signature verification against Stripe's actual value.
