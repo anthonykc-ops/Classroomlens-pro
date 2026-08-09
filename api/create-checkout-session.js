@@ -25,7 +25,24 @@ export default async function handler(req, res) {
       .eq("user_id", user.id)
       .single();
 
+    // Test-mode and live-mode customers are separate object spaces in Stripe —
+    // a stripe_customer_id saved while STRIPE_SECRET_KEY was a test key (or
+    // whose customer was later deleted) doesn't exist against a live key, and
+    // Stripe reports that as a "No such customer" resource_missing error.
+    // Treat that as "no customer on file yet" rather than a hard failure.
     let customerId = billing?.stripe_customer_id;
+    if (customerId) {
+      try {
+        await stripe.customers.retrieve(customerId);
+      } catch (err) {
+        if (err.code === "resource_missing") {
+          console.error(`stripe_customer_id ${customerId} not found (likely a stale test-mode id) — creating a new customer`, err.message);
+          customerId = null;
+        } else {
+          throw err;
+        }
+      }
+    }
     if (!customerId) {
       const customer = await stripe.customers.create({
         email: user.email,
