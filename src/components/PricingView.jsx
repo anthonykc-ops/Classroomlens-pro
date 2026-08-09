@@ -4,15 +4,15 @@ import { startCheckout } from "../lib/billingApi.js";
 
 const PLANS = [
   {
-    id: "monthly", name: "Monthly", price: "$9.99", period: "/ month",
+    id: "monthly", name: "Monthly", price: "$9.99", period: "/ month", extra: "7-day free trial",
     desc: "Flat monthly rate. Cancel any time.",
-    features: ["All 5 evaluation frameworks", "AI analysis & growth plans", "IEP & PLC meeting tools", "Unlimited observations"],
+    features: ["7-day free trial, no charge until it ends", "All 5 evaluation frameworks", "AI analysis & growth plans", "IEP & PLC meeting tools", "Unlimited observations"],
     highlight: false,
   },
   {
-    id: "annual", name: "Annual", price: "$59.99", period: "/ year", extra: "Save 50% vs. monthly",
+    id: "annual", name: "Annual", price: "$59.99", period: "/ year", extra: "7-day free trial · Save 50% vs. monthly",
     desc: "One payment, full access for 12 months.",
-    features: ["Everything in Monthly", "Unlimited observations", "School-wide admin dashboard", "Priority support"],
+    features: ["7-day free trial, no charge until it ends", "Everything in Monthly", "Unlimited observations", "School-wide admin dashboard", "Priority support"],
     highlight: true,
   },
 ];
@@ -53,7 +53,7 @@ export function PricingView({ mode = "gate", onDismiss }) {
             </div>
             <div style={{ fontSize: 20, fontWeight: 800, color: "var(--text)", marginBottom: 8 }}>Choose your plan</div>
             <p style={{ fontSize: 13, color: "var(--text-4)", maxWidth: 460, margin: "0 auto" }}>
-              Simple flat-rate pricing — no metering, no per-observation fees. Cancel any time.
+              7-day free trial — no credit card charge for 7 days. Cancel any time before then and you won't be billed.
             </p>
           </div>
 

@@ -76,7 +76,7 @@ function MarketingPanel() {
 
         <div style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "rgba(129,140,248,0.14)", border: "1px solid rgba(129,140,248,0.28)", borderRadius: 999, padding: "8px 16px", marginTop: 32, alignSelf: "flex-start" }}>
           <span style={{ fontSize: 14 }}>✦</span>
-          <span style={{ fontSize: 12, fontWeight: 700, color: "#e0e7ff" }}>Simple flat-rate pricing — starts at $9.99/month</span>
+          <span style={{ fontSize: 12, fontWeight: 700, color: "#e0e7ff" }}>Start your 7-day free trial — no credit card charge for 7 days</span>
         </div>
       </div>
     </div>
@@ -155,7 +155,7 @@ export function AuthScreen() {
   const subheading = mode === "signin"
     ? "Sign in to pick up right where you left off."
     : mode === "signup"
-      ? "Create your account, then choose a plan to get started."
+      ? "Start your 7-day free trial — no credit card charge for 7 days."
       : "We'll email you a link to reset it.";
 
   return (
@@ -232,12 +232,12 @@ export function AuthScreen() {
               <Btn full size="lg" disabled={loading} style={{ marginTop: 4 }}>
                 {loading
                   ? <span style={{ display: "flex", alignItems: "center", gap: 10, justifyContent: "center" }}><Spinner />Please wait…</span>
-                  : mode === "signin" ? "Sign In →" : mode === "signup" ? "Create Account →" : "Send Reset Email →"}
+                  : mode === "signin" ? "Sign In →" : mode === "signup" ? "Start Free Trial →" : "Send Reset Email →"}
               </Btn>
 
               {mode === "signup" && (
                 <p style={{ fontSize: 11, color: "var(--text-5)", textAlign: "center", marginTop: 12 }}>
-                  🔒 Flat-rate plans from $9.99/month, cancel any time
+                  🔒 7-day free trial, then $9.99/month or $59.99/year — cancel any time
                 </p>
               )}
             </form>

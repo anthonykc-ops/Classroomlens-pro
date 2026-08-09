@@ -61,6 +61,14 @@ export default async function handler(req, res) {
     // waiting on the webhook for the user-facing activation moment. The
     // webhook still runs too, as the authoritative record and to handle
     // renewals/cancellations, which have no redirect to hook into.
+    //
+    // trial_period_days: 7 — a card is still collected at checkout (default
+    // payment_method_collection behavior), but nothing is charged until the
+    // trial ends. The resulting subscription's status is "trialing", not
+    // "active", until then; both api/verify-checkout-session.js and
+    // stripe-webhook.js read the real status back from Stripe rather than
+    // assuming "active", and the billing gates treat "trialing" the same as
+    // "active".
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
       customer: customerId,
@@ -68,7 +76,7 @@ export default async function handler(req, res) {
       success_url: `${origin}/app?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${origin}/app?checkout=cancelled`,
       metadata: { supabase_user_id: user.id, plan },
-      subscription_data: { metadata: { supabase_user_id: user.id, plan } },
+      subscription_data: { trial_period_days: 7, metadata: { supabase_user_id: user.id, plan } },
     });
 
     return res.status(200).json({ url: session.url });

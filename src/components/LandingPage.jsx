@@ -344,13 +344,13 @@ const PREVIEW_TABS = [
 const PRICING = [
   {
     name: "Monthly", price: "$9.99", period: "/ month", desc: "For teachers and independent coaches",
-    features: ["All 5 evaluation frameworks", "AI analysis & growth plans", "IEP & PLC meeting tools", "Unlimited observations"],
-    cta: "Get Started", variant: "outline", highlight: false,
+    features: ["7-day free trial, no charge until it ends", "All 5 evaluation frameworks", "AI analysis & growth plans", "IEP & PLC meeting tools", "Unlimited observations"],
+    cta: "Start Free Trial", variant: "outline", highlight: false,
   },
   {
     name: "Annual", price: "$59.99", period: "/ year — save 50%", desc: "For principals and instructional leaders",
-    features: ["Everything in Monthly", "Unlimited observations", "School-wide admin dashboard", "Priority support"],
-    cta: "Get Started", variant: "primary", highlight: true,
+    features: ["7-day free trial, no charge until it ends", "Everything in Monthly", "Unlimited observations", "School-wide admin dashboard", "Priority support"],
+    cta: "Start Free Trial", variant: "primary", highlight: true,
   },
   {
     name: "District", price: "Custom", period: "", desc: "For multi-school districts",
@@ -361,7 +361,7 @@ const PRICING = [
 
 export function LandingPage({ isLoggedIn }) {
   const appHref = "/app";
-  const heroCta = isLoggedIn ? "Go to Dashboard" : "Get Started";
+  const heroCta = isLoggedIn ? "Go to Dashboard" : "Start your 7-day free trial";
   const [previewTab, setPreviewTab] = useState("dashboard");
   const activePreview = PREVIEW_TABS.find(t => t.id === previewTab) || PREVIEW_TABS[0];
 
@@ -381,7 +381,7 @@ export function LandingPage({ isLoggedIn }) {
             </div>
             <div style={{ display: "flex", gap: 10 }}>
               <CTAButton href={appHref} variant="outline" size="md">{isLoggedIn ? "Dashboard" : "Sign In"}</CTAButton>
-              {!isLoggedIn && <CTAButton href={appHref} variant="primary" size="md">Get Started</CTAButton>}
+              {!isLoggedIn && <CTAButton href={appHref} variant="primary" size="md">Start Free Trial</CTAButton>}
             </div>
           </div>
         </div>
@@ -571,7 +571,7 @@ export function LandingPage({ isLoggedIn }) {
         <div style={{ textAlign: "center", maxWidth: 560, margin: "0 auto 44px" }}>
           <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.12em", color: "var(--accent)", marginBottom: 12 }}>PRICING</div>
           <h2 style={{ fontSize: 30, fontWeight: 800, color: "var(--text)", letterSpacing: "-0.01em", marginBottom: 12 }}>Simple pricing, built to scale with you</h2>
-          <p style={{ fontSize: 14, color: "var(--text-4)" }}>No metering, no per-observation fees — just two simple flat-rate plans.</p>
+          <p style={{ fontSize: 14, color: "var(--text-4)" }}>7-day free trial — no credit card charge for 7 days. No metering, no per-observation fees.</p>
         </div>
         <div className="cl-land-pricing">
           {PRICING.map(p => (
@@ -607,7 +607,7 @@ export function LandingPage({ isLoggedIn }) {
         <div className="cl-land-glow-a" />
         <div style={{ position: "relative", maxWidth: 620, margin: "0 auto", padding: "72px 24px", textAlign: "center" }}>
           <h2 style={{ fontSize: 28, fontWeight: 800, color: "#fff", letterSpacing: "-0.01em", marginBottom: 14 }}>Ready to get started?</h2>
-          <p style={{ fontSize: 14, color: "var(--sidebar-text)", marginBottom: 28 }}>Choose a plan and set up your first observation in under five minutes.</p>
+          <p style={{ fontSize: 14, color: "var(--sidebar-text)", marginBottom: 28 }}>7-day free trial, no credit card charge for 7 days — set up your first observation in under five minutes.</p>
           <CTAButton href={appHref} variant="onDark">{heroCta} →</CTAButton>
         </div>
       </div>

@@ -96,11 +96,18 @@ async fetch(request) {
           break;
         }
 
+        // Both plans include a 7-day trial (trial_period_days on
+        // subscription_data — see api/create-checkout-session.js), so the
+        // subscription's real status here is "trialing", not "active".
+        // Reading it back from Stripe rather than hardcoding it keeps this
+        // correct if a trial-less checkout is ever added later too.
+        const subscription = await stripe.subscriptions.retrieve(session.subscription);
+
         await updateBilling({
           match: { user_id: userId },
           patch: {
             plan,
-            subscription_status: "active",
+            subscription_status: subscription.status,
             stripe_subscription_id: session.subscription,
           },
           context: `checkout.session.completed (${plan})`,

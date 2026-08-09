@@ -26,7 +26,11 @@ export default async function handler(req, res) {
     if (session.metadata?.supabase_user_id !== user.id) {
       return res.status(403).json({ error: "This checkout session does not belong to you" });
     }
-    if (session.payment_status !== "paid" || session.status !== "complete") {
+    // With a 7-day trial (trial_period_days on subscription_data), nothing is
+    // due at checkout, so Stripe reports payment_status as
+    // "no_payment_required" rather than "paid" — a valid completed checkout,
+    // not a failure.
+    if (!["paid", "no_payment_required"].includes(session.payment_status) || session.status !== "complete") {
       return res.status(400).json({ error: "Payment not completed", status: session.status, paymentStatus: session.payment_status });
     }
 
@@ -35,11 +39,17 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: "Unrecognized plan on this session" });
     }
 
+    // Read the subscription's actual status back from Stripe rather than
+    // assuming "active" — during the 7-day trial it's "trialing", which the
+    // billing gates (api/track-observation.js, src/App.jsx) treat the same
+    // as "active".
+    const subscription = await stripe.subscriptions.retrieve(session.subscription);
+
     const { data, error } = await supabaseAdmin
       .from("billing_accounts")
       .update({
         plan,
-        subscription_status: "active",
+        subscription_status: subscription.status,
         stripe_subscription_id: session.subscription,
         updated_at: new Date().toISOString(),
       })

@@ -416,3 +416,18 @@ alter table public.billing_accounts drop constraint if exists billing_accounts_p
 alter table public.billing_accounts add constraint billing_accounts_plan_check check (plan in ('trial','monthly','annual')) not valid;
 
 alter table public.billing_accounts add column if not exists stripe_subscription_id text; -- monthly or annual subscription
+
+-- ─────────────────────────────────────────────────────────────────
+-- ClassroomLens Pro — 7-day free trial on Monthly/Annual
+--
+-- Both plans now include trial_period_days: 7 in Checkout (see
+-- api/create-checkout-session.js) — a card is collected but not charged
+-- until the trial ends. Stripe reports the subscription's status as
+-- 'trialing' during that window, not 'active', so it needs to be an
+-- allowed value here. Not to be confused with billing_accounts.plan's
+-- 'trial' value, which means "no plan chosen yet" — a trialing
+-- subscription always has plan set to 'monthly' or 'annual'.
+-- ─────────────────────────────────────────────────────────────────
+alter table public.billing_accounts drop constraint if exists billing_accounts_subscription_status_check;
+alter table public.billing_accounts add constraint billing_accounts_subscription_status_check
+  check (subscription_status in ('none','trialing','active','past_due','canceled')) not valid;

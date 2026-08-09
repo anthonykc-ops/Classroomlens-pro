@@ -3177,11 +3177,12 @@ export default function App() {
     refreshBilling();
   }, [user, refreshBilling]);
 
-  // No free trial — every account starts at plan "trial" (meaning "no plan
-  // chosen yet") and is blocked from the app entirely until they have an
-  // active monthly/annual subscription. Mirrors the server-side gate in
-  // api/track-observation.js, so a canceled/past-due subscription blocks
-  // access here too, not just a brand-new account.
+  // Every account starts at plan "trial" (meaning "no plan chosen yet") and
+  // is blocked from the app entirely until they start a monthly/annual
+  // subscription — both include a 7-day free trial (Stripe status
+  // "trialing"), which gets full access exactly like "active". Mirrors the
+  // server-side gate in api/track-observation.js, so a canceled/past-due
+  // subscription blocks access here too, not just a brand-new account.
   //
   // Also requires stripe_customer_id: create-portal-session.js clears it
   // (without touching plan/subscription_status) when it finds a stale
@@ -3190,7 +3191,9 @@ export default function App() {
   // "Manage Subscription" keeps failing. Forcing the gate back open sends
   // them through checkout again, which creates a fresh live customer.
   const blocked = billing !== undefined
-    && !((billing.plan === "monthly" || billing.plan === "annual") && billing.subscription_status === "active" && billing.stripe_customer_id);
+    && !((billing.plan === "monthly" || billing.plan === "annual")
+      && (billing.subscription_status === "active" || billing.subscription_status === "trialing")
+      && billing.stripe_customer_id);
 
   // Returning from Stripe Checkout. session_id is read before the query
   // string is cleared so it can be verified directly against the Stripe API
