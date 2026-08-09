@@ -1,0 +1,34 @@
+/* The printable report is always rendered in the DOM (so window.print() has
+   something to print immediately) but hidden on screen — only shown by the
+   @media print rules below. */
+.printable-report {
+  display: none;
+}
+
+@media print {
+  @page {
+    size: letter;
+    margin: 0.6in;
+  }
+
+  /* Hides the sidebar, top nav, tabs, and every other on-screen element —
+     only .printable-report and its contents are made visible again below.
+     Cheaper and more robust than hand-tagging every screen-only element
+     with a "no-print" class. */
+  body * {
+    visibility: hidden;
+  }
+
+  .printable-report,
+  .printable-report * {
+    visibility: visible !important;
+  }
+
+  .printable-report {
+    display: block !important;
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+  }
+}

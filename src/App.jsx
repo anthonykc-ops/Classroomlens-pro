@@ -1283,6 +1283,208 @@ function CoachingView({ session }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// PRINTABLE REPORT (PDF export via window.print() — see src/print.css)
+// Always rendered while a session is active, kept invisible on screen and
+// shown only inside @media print, so the "Download PDF" button just calls
+// window.print() with no async work needed. Deliberately plain, static
+// markup (no buttons, no hover states) — this is what actually prints.
+// ─────────────────────────────────────────────────────────────────────────────
+const REPORT_TYPE_LABEL = {
+  formal: "Formal Summative Evaluation",
+  teacher: "Teacher Feedback Letter",
+  admin: "Admin / Principal Summary",
+  growth: "PD Action Plan Memo",
+};
+
+function PrintSectionTitle({ children, color = "#0f172a" }) {
+  return (
+    <div style={{ fontSize: 11, fontWeight: 800, color, letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 10, paddingBottom: 5, borderBottom: "1px solid #e2e8f0" }}>
+      {children}
+    </div>
+  );
+}
+
+function PrintableReport({ session, reportType, reportText }) {
+  if (!session) return null;
+  const { analysis, framework: fwKey, meta } = session;
+  const fw = FRAMEWORKS[fwKey];
+  const maxRating = Object.keys(fw.ratingScale).length;
+  const overallRounded = analysis.overallRating ? Math.round(analysis.overallRating) : null;
+
+  const domainAvgs = Object.entries(fw.domains).map(([dk, d]) => {
+    const rated = Object.keys(d.components).map(c => analysis.evidence?.[c]?.rating).filter(Boolean);
+    const avg = rated.length ? rated.reduce((a, b) => a + b, 0) / rated.length : null;
+    return { dk, d, avg };
+  });
+
+  return (
+    <div id="printable-report" className="printable-report">
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "2px solid #0f172a", paddingBottom: 14, marginBottom: 20 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ width: 34, height: 34, background: "linear-gradient(135deg,#4f46e5,#4338ca)", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+            <Icon name="lens" size={18} />
+          </div>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 800, color: "#0f172a" }}>ClassroomLens <span style={{ color: "#4f46e5" }}>Pro</span></div>
+            <div style={{ fontSize: 9, color: "#64748b", letterSpacing: "0.08em" }}>CLASSROOM OBSERVATION REPORT</div>
+          </div>
+        </div>
+        <div style={{ fontSize: 10, color: "#64748b" }}>Generated {new Date().toLocaleDateString()}</div>
+      </div>
+
+      {/* Observation details */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, marginBottom: 20, fontSize: 11 }}>
+        {[["Teacher", meta.teacher], ["Observer", meta.observer], ["School", meta.school],
+          ["Grade", meta.grade], ["Subject", meta.subject], ["Date", meta.date],
+          ["Framework", fw.name]].map(([l, v]) => (
+          <div key={l}><strong style={{ color: "#475569" }}>{l}:</strong> <span style={{ color: "#0f172a" }}>{v || "—"}</span></div>
+        ))}
+      </div>
+
+      {/* Overall rating */}
+      <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 20, padding: 14, background: "#f8fafc", borderRadius: 8, border: "1px solid #e2e8f0", breakInside: "avoid" }}>
+        <div style={{ fontSize: 32, fontWeight: 800, color: fw.color, fontFamily: "'JetBrains Mono',monospace" }}>{analysis.overallRating?.toFixed(1) || "—"}</div>
+        <div>
+          <div style={{ fontSize: 10, color: "#64748b", fontWeight: 700, letterSpacing: "0.08em" }}>OVERALL RATING</div>
+          <div style={{ fontSize: 15, fontWeight: 800, color: "#0f172a" }}>{overallRounded ? fw.ratingScale[overallRounded] : "—"}</div>
+        </div>
+      </div>
+
+      {/* Narrative report, if one was generated on this tab */}
+      {reportText && (
+        <div style={{ marginBottom: 20, breakInside: "avoid" }}>
+          <PrintSectionTitle>{REPORT_TYPE_LABEL[reportType] || "Report"}</PrintSectionTitle>
+          <p style={{ fontSize: 11.5, color: "#1e293b", lineHeight: 1.8, whiteSpace: "pre-wrap" }}>{reportText}</p>
+        </div>
+      )}
+
+      {/* Domain scores */}
+      <div style={{ marginBottom: 20 }}>
+        <PrintSectionTitle>Domain Scores</PrintSectionTitle>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 10 }}>
+          {domainAvgs.map(({ dk, d, avg }) => (
+            <div key={dk} style={{ border: "1px solid #e2e8f0", borderRadius: 6, padding: 10, breakInside: "avoid" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                <span style={{ fontSize: 10, fontWeight: 800, color: d.color }}>{dk} — {d.label}</span>
+                <span style={{ fontSize: 12, fontWeight: 800, color: d.color }}>{avg?.toFixed(1) || "—"}</span>
+              </div>
+              <div style={{ background: "#e2e8f0", borderRadius: 4, height: 6, overflow: "hidden" }}>
+                <div style={{ width: `${Math.max((avg || 0) / maxRating * 100, 0)}%`, height: "100%", background: d.color }} />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Strengths / Growth areas */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 20, breakInside: "avoid" }}>
+        <div>
+          <PrintSectionTitle color="#16a34a">Strengths</PrintSectionTitle>
+          {(analysis.strengths || []).map((s, i) => (
+            <div key={i} style={{ fontSize: 11, color: "#334155", lineHeight: 1.7, marginBottom: 5 }}>• {s}</div>
+          ))}
+        </div>
+        <div>
+          <PrintSectionTitle color="#d97706">Growth Areas</PrintSectionTitle>
+          {(analysis.growthAreas || []).map((s, i) => (
+            <div key={i} style={{ fontSize: 11, color: "#334155", lineHeight: 1.7, marginBottom: 5 }}>• {s}</div>
+          ))}
+        </div>
+      </div>
+
+      {/* Evidence by component */}
+      <div style={{ marginBottom: 20 }}>
+        <PrintSectionTitle>Evidence by Component</PrintSectionTitle>
+        {Object.entries(fw.domains).map(([dk, d]) => {
+          const comps = Object.entries(d.components).filter(([ck]) => analysis.evidence?.[ck]);
+          if (!comps.length) return null;
+          return (
+            <div key={dk} style={{ marginBottom: 12, breakInside: "avoid" }}>
+              <div style={{ fontSize: 10, fontWeight: 800, color: d.color, marginBottom: 6 }}>{dk} — {d.label}</div>
+              {comps.map(([ck, cn]) => {
+                const ev = analysis.evidence[ck];
+                return (
+                  <div key={ck} style={{ marginBottom: 8, paddingLeft: 10, borderLeft: `3px solid ${d.color}` }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "#0f172a" }}>
+                      {ck} {cn} {ev.rating && <span style={{ color: d.color, fontWeight: 800 }}>— {ev.rating} ({fw.ratingScale[ev.rating]})</span>}
+                    </div>
+                    {(ev.evidence || []).slice(0, 2).map((e, i) => (
+                      <div key={i} style={{ fontSize: 10.5, color: "#475569", fontStyle: "italic", marginTop: 3 }}>❝ {e} ❞</div>
+                    ))}
+                    {ev.feedback && <div style={{ fontSize: 10.5, color: "#334155", marginTop: 3 }}>{ev.feedback}</div>}
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Growth plan */}
+      {analysis.growthPlan && (
+        <div style={{ marginBottom: 20 }}>
+          <PrintSectionTitle>Growth Plan</PrintSectionTitle>
+          {[["Immediate (Next Class)", analysis.growthPlan.immediate],
+            ["Short-Term (2 Weeks)", analysis.growthPlan.shortTerm],
+            ["Long-Term", analysis.growthPlan.longTerm]].map(([label, items]) => (
+            items?.length > 0 && (
+              <div key={label} style={{ marginBottom: 8, breakInside: "avoid" }}>
+                <div style={{ fontSize: 10.5, fontWeight: 700, color: "#0f172a", marginBottom: 3 }}>{label}</div>
+                {items.map((s, i) => <div key={i} style={{ fontSize: 11, color: "#334155", lineHeight: 1.6, marginBottom: 3 }}>• {s}</div>)}
+              </div>
+            )
+          ))}
+        </div>
+      )}
+
+      {/* Scripted language examples */}
+      {analysis.scriptedExamples && (
+        <div style={{ marginBottom: 20, breakInside: "avoid" }}>
+          <PrintSectionTitle>Scripted Language</PrintSectionTitle>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <div>
+              <div style={{ fontSize: 10, fontWeight: 700, color: "#16a34a", marginBottom: 4 }}>WHAT WORKED</div>
+              <p style={{ fontSize: 11, color: "#334155", fontStyle: "italic", lineHeight: 1.7 }}>"{analysis.scriptedExamples.whatWorked}"</p>
+            </div>
+            <div>
+              <div style={{ fontSize: 10, fontWeight: 700, color: "#4f46e5", marginBottom: 4 }}>TRY NEXT TIME</div>
+              <p style={{ fontSize: 11, color: "#334155", fontStyle: "italic", lineHeight: 1.7 }}>"{analysis.scriptedExamples.whatToTry}"</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Student intervention recommendations, if any */}
+      {analysis.studentInterventions?.length > 0 && (
+        <div style={{ marginBottom: 20 }}>
+          <PrintSectionTitle>Student Intervention Recommendations</PrintSectionTitle>
+          {analysis.studentInterventions.map((item, i) => (
+            <div key={i} style={{ marginBottom: 8, paddingLeft: 10, borderLeft: "3px solid #64748b", breakInside: "avoid" }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#0f172a" }}>{item.studentRef} <span style={{ fontWeight: 600, color: "#64748b" }}>({item.urgency} priority)</span></div>
+              <div style={{ fontSize: 10.5, color: "#334155", marginTop: 2 }}><strong>Observed:</strong> {item.observation}</div>
+              <div style={{ fontSize: 10.5, color: "#334155", marginTop: 2 }}><strong>Intervention:</strong> {item.intervention}</div>
+              {item.strategy && <div style={{ fontSize: 10.5, color: "#334155", marginTop: 2 }}><strong>Strategy:</strong> {item.strategy}</div>}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Signatures */}
+      <div style={{ display: "flex", justifyContent: "space-between", marginTop: 36, paddingTop: 16, borderTop: "1px solid #cbd5e1", breakInside: "avoid" }}>
+        <div style={{ fontSize: 10.5, color: "#334155" }}>Observer Signature: ________________________&nbsp;&nbsp;&nbsp;Date: ________</div>
+        <div style={{ fontSize: 10.5, color: "#334155" }}>Teacher Signature: ________________________&nbsp;&nbsp;&nbsp;Date: ________</div>
+      </div>
+
+      {/* Footer */}
+      <div style={{ marginTop: 16, textAlign: "center", fontSize: 9, color: "#94a3b8" }}>
+        Generated by ClassroomLens Pro · support@classroomlens.com
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // REPORTS VIEW
 // ─────────────────────────────────────────────────────────────────────────────
 function ReportView({ session }) {
@@ -1345,7 +1547,10 @@ function ReportView({ session }) {
         <Card style={{ borderTop: "3px solid var(--accent)" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: 8 }}>
             <Label>Generated Report</Label>
-            <Btn size="sm" variant="outline" onClick={copy}>📋 Copy Full Report</Btn>
+            <div style={{ display: "flex", gap: 8 }}>
+              <Btn size="sm" variant="outline" onClick={copy}>📋 Copy Full Report</Btn>
+              <Btn size="sm" variant="outline" onClick={() => window.print()}>⬇ Download PDF</Btn>
+            </div>
           </div>
           <div style={{ background: "var(--surface-2)", borderRadius: 8, padding: 16, marginBottom: 14 }}>
             <div style={{ fontSize: 14, fontWeight: 800, color: "var(--text)", marginBottom: 10 }}>Classroom Observation Report</div>
@@ -1363,6 +1568,8 @@ function ReportView({ session }) {
           <div style={{ marginTop: 10, fontSize: 9, color: "var(--text-faint)", textAlign: "center" }}>Generated by ClassroomLens Pro · support@classroomlens.com</div>
         </Card>
       )}
+
+      <PrintableReport session={session} reportType={reportType} reportText={reportText} />
     </div>
   );
 }
