@@ -402,7 +402,7 @@ export function LandingPage({ isLoggedIn }) {
                 AI-POWERED OBSERVATION PLATFORM
               </div>
               <h1 style={{ fontSize: 34, fontWeight: 800, lineHeight: 1.2, letterSpacing: "-0.02em", color: "#fff", marginBottom: 14 }}>
-                Real-time AI feedback on your observations, lesson plans, IEP meetings, and PLC meetings — for teachers and administrators who want to grow.
+                Real-time feedback on your observations, lesson plans, IEP meetings, and PLC meetings — for teachers and administrators who want to grow.
               </h1>
               <div style={{ display: "flex", gap: 7, flexWrap: "wrap", marginBottom: 14 }}>
                 {FRAMEWORK_BADGES.map(f => (
