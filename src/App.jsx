@@ -2906,7 +2906,7 @@ function SettingsView({ onClearSessions, sessionCount, legacyCount, onImportLega
         {billing?.plan === "monthly" && (
           <>
             <p style={{ fontSize: 13, color: "var(--text-2)", marginBottom: 14 }}>
-              $9.99/month, unlimited observations. <strong>{billing.billing_period_observations}</strong> analyzed so far.
+              $4.99/month, unlimited observations. <strong>{billing.billing_period_observations}</strong> analyzed so far.
             </p>
             <Btn onClick={manageSubscription} disabled={portalLoading}>
               {portalLoading ? <span style={{ display:"flex",gap:8,alignItems:"center" }}><Spinner size={14}/>Opening…</span> : "Manage Subscription"}
@@ -2917,7 +2917,7 @@ function SettingsView({ onClearSessions, sessionCount, legacyCount, onImportLega
         {billing?.plan === "annual" && (
           <>
             <p style={{ fontSize: 13, color: "var(--text-2)", marginBottom: 14 }}>
-              $59.99/year, unlimited observations. <strong>{billing.billing_period_observations}</strong> analyzed so far.
+              $19.99/year, unlimited observations. <strong>{billing.billing_period_observations}</strong> analyzed so far.
             </p>
             <Btn onClick={manageSubscription} disabled={portalLoading}>
               {portalLoading ? <span style={{ display:"flex",gap:8,alignItems:"center" }}><Spinner size={14}/>Opening…</span> : "Manage Subscription"}

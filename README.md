@@ -98,7 +98,7 @@ The app opens automatically at: **http://localhost:3000**. Create an account
 | 🗣️ PLC Meeting Analyzer | Analyze PLC meetings for decisions, action items, collaborative inquiry, and norms adherence |
 | 📄 Lesson Plan Analyzer | Paste, upload, or record a lesson-plan walkthrough for framework-mapped feedback |
 | 📁 Session Storage | Synced to your account in the cloud — available on any device you log into |
-| 💳 Billing (Stripe) | Flat-rate plans, no free trial — Monthly ($9.99/mo) or Annual ($59.99/yr, save 50%) |
+| 💳 Billing (Stripe) | Flat-rate plans, 7-day free trial — Monthly ($4.99/mo) or Annual ($19.99/yr, save 67%) |
 | ⚙️ Settings | Update API key, manage data, manage subscription |
 
 *IEP, PLC, and Lesson Plan analyses are stateless — nothing from those three tools is saved to your account.*

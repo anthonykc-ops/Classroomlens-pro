@@ -237,7 +237,7 @@ export function AuthScreen() {
 
               {mode === "signup" && (
                 <p style={{ fontSize: 11, color: "var(--text-5)", textAlign: "center", marginTop: 12 }}>
-                  🔒 7-day free trial, then $9.99/month or $59.99/year — cancel any time
+                  🔒 7-day free trial, then $4.99/month or $19.99/year — cancel any time
                 </p>
               )}
             </form>

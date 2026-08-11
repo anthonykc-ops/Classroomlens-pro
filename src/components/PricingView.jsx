@@ -4,13 +4,13 @@ import { startCheckout } from "../lib/billingApi.js";
 
 const PLANS = [
   {
-    id: "monthly", name: "Monthly", price: "$9.99", period: "/ month", extra: "7-day free trial",
+    id: "monthly", name: "Monthly", price: "$4.99", period: "/ month", extra: "7-day free trial",
     desc: "Flat monthly rate. Cancel any time.",
     features: ["7-day free trial, no charge until it ends", "All 8 evaluation frameworks", "AI analysis & growth plans", "IEP & PLC meeting tools", "Unlimited observations"],
     highlight: false,
   },
   {
-    id: "annual", name: "Annual", price: "$59.99", period: "/ year", extra: "7-day free trial · Save 50% vs. monthly",
+    id: "annual", name: "Annual", price: "$19.99", period: "/ year", extra: "7-day free trial · Save 67% vs. monthly",
     desc: "One payment, full access for 12 months.",
     features: ["7-day free trial, no charge until it ends", "Everything in Monthly", "Unlimited observations", "School-wide admin dashboard", "Priority support"],
     highlight: true,

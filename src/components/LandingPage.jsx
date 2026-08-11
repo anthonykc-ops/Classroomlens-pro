@@ -346,12 +346,12 @@ const PREVIEW_TABS = [
 
 const PRICING = [
   {
-    name: "Monthly", price: "$9.99", period: "/ month", desc: "For teachers and independent coaches",
+    name: "Monthly", price: "$4.99", period: "/ month", desc: "For teachers and independent coaches",
     features: ["7-day free trial, no charge until it ends", "All 8 evaluation frameworks", "AI analysis & growth plans", "IEP & PLC meeting tools", "Unlimited observations"],
     cta: "Start Free Trial", variant: "outline", highlight: false,
   },
   {
-    name: "Annual", price: "$59.99", period: "/ year — save 50%", desc: "For principals and instructional leaders",
+    name: "Annual", price: "$19.99", period: "/ year — save 67%", desc: "For principals and instructional leaders",
     features: ["7-day free trial, no charge until it ends", "Everything in Monthly", "Unlimited observations", "School-wide admin dashboard", "Priority support"],
     cta: "Start Free Trial", variant: "primary", highlight: true,
   },
