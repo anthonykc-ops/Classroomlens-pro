@@ -6,7 +6,7 @@ const PLANS = [
   {
     id: "monthly", name: "Monthly", price: "$9.99", period: "/ month", extra: "7-day free trial",
     desc: "Flat monthly rate. Cancel any time.",
-    features: ["7-day free trial, no charge until it ends", "All 5 evaluation frameworks", "AI analysis & growth plans", "IEP & PLC meeting tools", "Unlimited observations"],
+    features: ["7-day free trial, no charge until it ends", "All 8 evaluation frameworks", "AI analysis & growth plans", "IEP & PLC meeting tools", "Unlimited observations"],
     highlight: false,
   },
   {

@@ -307,6 +307,144 @@ const FRAMEWORKS = {
     },
     ratingScale: { 1: "Unsatisfactory", 2: "Basic", 3: "Proficient", 4: "Distinguished" },
   },
+
+  ttess: {
+    name: "Texas Teacher Evaluation and Support System (T-TESS)",
+    shortName: "T-TESS",
+    version: "2016",
+    color: "#0d9488",
+    usedIn: "All Texas school districts",
+    domains: {
+      "Domain 1": {
+        label: "Planning", color: "#0d9488",
+        components: {
+          "1.1": "Standards and Alignment",
+          "1.2": "Data and Assessment",
+          "1.3": "Knowledge of Students",
+          "1.4": "Activities",
+        },
+      },
+      "Domain 2": {
+        label: "Instruction", color: "#14b8a6",
+        components: {
+          "2.1": "Achieving Expectations",
+          "2.2": "Content Knowledge and Expertise",
+          "2.3": "Communication",
+          "2.4": "Differentiation",
+          "2.5": "Monitor and Adjust",
+        },
+      },
+      "Domain 3": {
+        label: "Learning Environment", color: "#2dd4bf",
+        components: {
+          "3.1": "Classroom Environment, Routines & Procedures",
+          "3.2": "Managing Student Behavior",
+          "3.3": "Classroom Culture",
+        },
+      },
+      "Domain 4": {
+        label: "Professional Practices & Responsibilities", color: "#5eead4",
+        components: {
+          "4.1": "Professional Demeanor and Ethics",
+          "4.2": "Goal Setting",
+          "4.3": "Professional Development",
+          "4.4": "School Community Involvement",
+        },
+      },
+    },
+    ratingScale: { 1: "Improvement Needed", 2: "Developing", 3: "Proficient", 4: "Accomplished", 5: "Distinguished" },
+  },
+
+  team: {
+    name: "Tennessee Educator Acceleration Model (TEAM)",
+    shortName: "TEAM",
+    version: "General Educator Rubric",
+    color: "#db2777",
+    usedIn: "Tennessee districts",
+    domains: {
+      "Planning": {
+        label: "Planning", color: "#db2777",
+        components: {
+          "P1": "Instructional Plans",
+          "P2": "Student Work",
+          "P3": "Assessment",
+        },
+      },
+      "Environment": {
+        label: "Environment", color: "#ec4899",
+        components: {
+          "E1": "Expectations",
+          "E2": "Managing Student Behavior",
+          "E3": "Environment",
+          "E4": "Respectful Culture",
+        },
+      },
+      "Instruction": {
+        label: "Instruction", color: "#f472b6",
+        components: {
+          "I1": "Standards and Objectives",
+          "I2": "Motivating Students",
+          "I3": "Presenting Instructional Content",
+          "I4": "Lesson Structure and Pacing",
+          "I5": "Activities and Materials",
+          "I6": "Questioning",
+          "I7": "Academic Feedback",
+          "I8": "Grouping Students",
+          "I9": "Teacher Content Knowledge",
+          "I10": "Teacher Knowledge of Students",
+          "I11": "Thinking",
+          "I12": "Problem Solving",
+        },
+      },
+    },
+    ratingScale: { 1: "Significantly Below Expectations", 2: "Below Expectations", 3: "At Expectations", 4: "Above Expectations", 5: "Significantly Above Expectations" },
+  },
+
+  tkes: {
+    name: "Georgia Teacher Keys Effectiveness System (TKES)",
+    shortName: "TKES",
+    version: "Performance Standards",
+    color: "#7c3aed",
+    usedIn: "All Georgia school districts",
+    domains: {
+      "Planning": {
+        label: "Planning", color: "#7c3aed",
+        components: {
+          "PS1": "Professional Knowledge",
+          "PS2": "Instructional Planning",
+        },
+      },
+      "Instructional Delivery": {
+        label: "Instructional Delivery", color: "#8b5cf6",
+        components: {
+          "PS3": "Instructional Strategies",
+          "PS4": "Differentiated Instruction",
+        },
+      },
+      "Assessment": {
+        label: "Assessment of and for Learning", color: "#a78bfa",
+        components: {
+          "PS5": "Assessment Strategies",
+          "PS6": "Assessment Uses",
+        },
+      },
+      "Learning Environment": {
+        label: "Learning Environment", color: "#c4b5fd",
+        components: {
+          "PS7": "Positive Learning Environment",
+          "PS8": "Academically Challenging Environment",
+        },
+      },
+      "Professionalism & Communication": {
+        label: "Professionalism & Communication", color: "#a855f7",
+        components: {
+          "PS9": "Professionalism",
+          "PS10": "Communication",
+        },
+      },
+    },
+    ratingScale: { 1: "Ineffective", 2: "Needs Development", 3: "Proficient", 4: "Exemplary" },
+  },
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -782,7 +920,7 @@ function RecordView({ onAnalyze, onUsageChecked }) {
       {/* Framework selector */}
       <Card>
         <StepLabel n={2}>Evaluation Framework</StepLabel>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 8, marginBottom: 14 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 8, marginBottom: 14 }}>
           {Object.entries(FRAMEWORKS).map(([key, f]) => (
             <div key={key} onClick={() => setFramework(key)}
               style={{ background: framework===key ? f.color+"12" : "var(--surface)", border: `1.5px solid ${framework===key ? f.color : "var(--border-strong)"}`,
@@ -2394,7 +2532,7 @@ function LessonPlanView({ onUsageChecked }) {
 
       <Card>
         <Label>Evaluation Framework</Label>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 8 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 8 }}>
           {Object.entries(FRAMEWORKS).map(([key, f]) => (
             <div key={key} onClick={() => setFramework(key)}
               style={{ background: framework===key ? f.color+"12" : "var(--surface)", border: `1.5px solid ${framework===key ? f.color : "var(--border-strong)"}`,
@@ -2829,7 +2967,7 @@ function SettingsView({ onClearSessions, sessionCount, legacyCount, onImportLega
         <Label>About ClassroomLens Pro</Label>
         <div style={{ fontSize:12,color:"var(--text-3)",lineHeight:1.8 }}>
           <p>Version 1.0.0 · Built for instructional coaches, administrators, and teachers.</p>
-          <p style={{ marginTop:8 }}>Supports: Danielson (2022), Marzano 2.0, CEL 5D+, TNTP Core, TPEP (2023)</p>
+          <p style={{ marginTop:8 }}>Supports: Danielson (2022), Marzano 2.0, CEL 5D+, TNTP Core, TPEP (2023), T-TESS, TEAM, TKES</p>
           <p style={{ marginTop:8 }}>Support & licensing: <a href="mailto:support@classroomlens.com" style={{ color:"var(--accent)" }}>Customer Support</a></p>
           <p style={{ marginTop:8,color:"var(--text-5)" }}>© 2025 ClassroomLens Pro · All rights reserved</p>
         </div>

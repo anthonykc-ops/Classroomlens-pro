@@ -8,7 +8,7 @@ Built by Kim Anthony | anthonykc@gmail.com
 ## What This App Does
 
 ClassroomLens Pro records classroom lessons, transcribes them in real time, and uses AI to:
-- Map evidence to evaluation frameworks (Danielson, Marzano, CEL 5D+, TNTP, TPEP)
+- Map evidence to evaluation frameworks (Danielson, Marzano, CEL 5D+, TNTP, TPEP, T-TESS, TEAM, TKES)
 - Generate ratings with quoted evidence for every rubric component
 - Produce coaching feedback, growth plans, and formal reports
 - Facilitate pre/post observation conferences
@@ -88,7 +88,7 @@ The app opens automatically at: **http://localhost:3000**. Create an account
 | ⏺ Live Recording | Record lessons with real-time transcription (Chrome/Edge) |
 | ✏️ Paste Transcript | Paste any transcript for analysis |
 | ⚡ AI Analysis | Maps evidence to every framework component automatically |
-| 📋 5 Frameworks | Danielson, Marzano, CEL 5D+, TNTP Core, TPEP (WA) |
+| 📋 8 Frameworks | Danielson, Marzano, CEL 5D+, TNTP Core, TPEP (WA), T-TESS (TX), TEAM (TN), TKES (GA) |
 | 🌱 Growth Plans | 3-tier growth plan: tomorrow, 2-week, long-term |
 | 💬 Coaching Conference | AI-guided pre/post observation conversations |
 | 📄 4 Report Types | Formal eval, teacher letter, admin summary, PD memo |

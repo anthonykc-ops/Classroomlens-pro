@@ -59,6 +59,9 @@ const FRAMEWORK_BADGES = [
   { label: "CEL 5D+", color: "#f59e0b" },
   { label: "TNTP Core", color: "#ef4444" },
   { label: "Washington State TPEP", color: "#6366f1" },
+  { label: "T-TESS", color: "#0d9488" },
+  { label: "TEAM", color: "#db2777" },
+  { label: "TKES", color: "#7c3aed" },
 ];
 
 const FEATURES = [
@@ -344,7 +347,7 @@ const PREVIEW_TABS = [
 const PRICING = [
   {
     name: "Monthly", price: "$9.99", period: "/ month", desc: "For teachers and independent coaches",
-    features: ["7-day free trial, no charge until it ends", "All 5 evaluation frameworks", "AI analysis & growth plans", "IEP & PLC meeting tools", "Unlimited observations"],
+    features: ["7-day free trial, no charge until it ends", "All 8 evaluation frameworks", "AI analysis & growth plans", "IEP & PLC meeting tools", "Unlimited observations"],
     cta: "Start Free Trial", variant: "outline", highlight: false,
   },
   {
@@ -417,7 +420,7 @@ export function LandingPage({ isLoggedIn }) {
                 ))}
               </div>
               <p style={{ fontSize: 14, color: "var(--sidebar-text)", lineHeight: 1.6, marginBottom: 20, maxWidth: 480 }}>
-                Mapped to the frameworks your district already uses — Danielson, Marzano, CEL 5D+, TNTP Core, and Washington State TPEP.
+                Mapped to the frameworks your district already uses — Danielson, Marzano, CEL 5D+, TNTP Core, TPEP, T-TESS, TEAM, and TKES.
               </p>
               <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 24 }}>
                 <CTAButton href={appHref} variant="onDark">{heroCta} →</CTAButton>
