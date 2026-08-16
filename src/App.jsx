@@ -3255,9 +3255,13 @@ const PAGE_META = {
 export default function App() {
   const { user, loading: authLoading, signOut } = useAuth();
   // No client router in this app — /landing is always the public marketing page (rendered
-  // before we even wait on auth to resolve), and / falls back to it for logged-out visitors.
-  // Everything else (notably /app) goes through the normal sign-in → app flow below.
+  // before we even wait on auth to resolve), and / falls back to it for logged-out visitors
+  // on the marketing domain only. app.classroomlenspro.com and classroomlenspro.com are the
+  // same deployment, so without this host check the app subdomain's root would also show the
+  // landing page instead of going straight to sign-in. Everything else (notably /app) goes
+  // through the normal sign-in → app flow below.
   const path = window.location.pathname;
+  const isAppHost = window.location.hostname === "app.classroomlenspro.com";
   const [tab, setTab] = useState("dashboard");
   const [sessions, setSessions] = useState([]);
   const [sessionsLoading, setSessionsLoading] = useState(true);
@@ -3430,7 +3434,7 @@ export default function App() {
   );
 
   if (!user) {
-    if (path === "/" || path === "") return (
+    if (!isAppHost && (path === "/" || path === "")) return (
       <>
         <style>{css}</style>
         <LandingPage isLoggedIn={false} />
