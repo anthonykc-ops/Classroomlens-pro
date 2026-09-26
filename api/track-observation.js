@@ -22,9 +22,11 @@ export default async function handler(req, res) {
 
     // "trialing" (the 7-day free trial on both plans) gets full access, same
     // as "active" — the trial's whole point is unlimited use before the
-    // first charge.
-    const hasAccess = (billing.plan === "monthly" || billing.plan === "annual")
-      && (billing.subscription_status === "active" || billing.subscription_status === "trialing");
+    // first charge. comp_access (set manually in the DB, never by Stripe)
+    // grants access regardless of plan.
+    const hasAccess = billing.comp_access
+      || ((billing.plan === "monthly" || billing.plan === "annual")
+        && (billing.subscription_status === "active" || billing.subscription_status === "trialing"));
     if (hasAccess) {
       await supabaseAdmin.from("billing_accounts")
         .update({ billing_period_observations: billing.billing_period_observations + 1, updated_at: new Date().toISOString() })

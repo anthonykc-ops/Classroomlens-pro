@@ -431,3 +431,25 @@ alter table public.billing_accounts add column if not exists stripe_subscription
 alter table public.billing_accounts drop constraint if exists billing_accounts_subscription_status_check;
 alter table public.billing_accounts add constraint billing_accounts_subscription_status_check
   check (subscription_status in ('none','trialing','active','past_due','canceled')) not valid;
+
+-- ─────────────────────────────────────────────────────────────────
+-- ClassroomLens Pro — Complimentary access
+--
+-- comp_access = true lets an account through both billing gates (the
+-- frontend `blocked` check in src/App.jsx and api/track-observation.js)
+-- regardless of plan/subscription_status. Set manually here only — never
+-- by Stripe or the webhook — for owner/staff/comped accounts. Safe from
+-- self-service abuse because authenticated users only have SELECT on
+-- billing_accounts (see the grant above).
+--
+-- The plan is moved off the retired 'unlimited' value in the same update:
+-- the `not valid` plan check above is still enforced on every UPDATE, so
+-- touching a legacy 'payg'/'unlimited' row without fixing plan fails.
+-- ─────────────────────────────────────────────────────────────────
+alter table public.billing_accounts add column if not exists comp_access boolean not null default false;
+
+update public.billing_accounts
+set comp_access = true,
+    plan = case when plan in ('trial','monthly','annual') then plan else 'trial' end,
+    updated_at = now()
+where user_id = '8b38121a-b2d9-49dc-9092-3324704553a5';

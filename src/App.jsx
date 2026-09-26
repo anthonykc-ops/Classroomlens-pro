@@ -3332,7 +3332,11 @@ export default function App() {
   // check the user would be stuck seeing an active plan in the UI while
   // "Manage Subscription" keeps failing. Forcing the gate back open sends
   // them through checkout again, which creates a fresh live customer.
+  //
+  // comp_access (set manually in the DB, never by Stripe) bypasses all of
+  // this — see the comp-access migration in supabase/schema.sql.
   const blocked = billing !== undefined
+    && !billing.comp_access
     && !((billing.plan === "monthly" || billing.plan === "annual")
       && (billing.subscription_status === "active" || billing.subscription_status === "trialing")
       && billing.stripe_customer_id);
