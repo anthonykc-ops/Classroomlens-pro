@@ -453,3 +453,20 @@ set comp_access = true,
     plan = case when plan in ('trial','monthly','annual') then plan else 'trial' end,
     updated_at = now()
 where user_id = '8b38121a-b2d9-49dc-9092-3324704553a5';
+
+-- ─────────────────────────────────────────────────────────────────
+-- ClassroomLens Pro — Honor legacy 'unlimited' plans
+--
+-- 'unlimited' is allowed again so legacy Unlimited subscribers keep
+-- access: both billing gates (src/App.jsx `blocked` and
+-- api/track-observation.js) let plan = 'unlimited' through while
+-- subscription_status = 'active'. Still `not valid` so any leftover
+-- 'payg' rows don't abort this migration.
+-- ─────────────────────────────────────────────────────────────────
+alter table public.billing_accounts drop constraint if exists billing_accounts_plan_check;
+alter table public.billing_accounts add constraint billing_accounts_plan_check
+  check (plan in ('trial','monthly','annual','unlimited')) not valid;
+
+update public.billing_accounts
+set plan = 'unlimited', subscription_status = 'active', updated_at = now()
+where user_id = '8b38121a-b2d9-49dc-9092-3324704553a5';

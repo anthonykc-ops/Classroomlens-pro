@@ -23,8 +23,10 @@ export default async function handler(req, res) {
     // "trialing" (the 7-day free trial on both plans) gets full access, same
     // as "active" — the trial's whole point is unlimited use before the
     // first charge. comp_access (set manually in the DB, never by Stripe)
-    // grants access regardless of plan.
+    // grants access regardless of plan. Legacy 'unlimited' (pre flat-rate
+    // pricing) is honored while its subscription is active.
     const hasAccess = billing.comp_access
+      || (billing.plan === "unlimited" && billing.subscription_status === "active")
       || ((billing.plan === "monthly" || billing.plan === "annual")
         && (billing.subscription_status === "active" || billing.subscription_status === "trialing"));
     if (hasAccess) {

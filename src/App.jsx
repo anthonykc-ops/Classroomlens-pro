@@ -2869,7 +2869,7 @@ function SessionsList({ sessions, loading, currentUserId, onSelect, onDelete }) 
 // ─────────────────────────────────────────────────────────────────────────────
 // SETTINGS VIEW
 // ─────────────────────────────────────────────────────────────────────────────
-const PLAN_LABEL = { trial: "No Plan Selected", monthly: "Monthly", annual: "Annual" };
+const PLAN_LABEL = { trial: "No Plan Selected", monthly: "Monthly", annual: "Annual", unlimited: "Unlimited" };
 
 function SettingsView({ onClearSessions, sessionCount, legacyCount, onImportLegacy, billing, onOpenPricing }) {
   const [importing, setImporting] = useState(false);
@@ -3368,8 +3368,13 @@ export default function App() {
   //
   // comp_access (set manually in the DB, never by Stripe) bypasses all of
   // this — see the comp-access migration in supabase/schema.sql.
+  //
+  // Legacy 'unlimited' (pre flat-rate pricing) with an active subscription
+  // also gets through — without the stripe_customer_id requirement, since
+  // those rows may predate the live-mode customer migration.
   const blocked = billing !== undefined
     && !billing.comp_access
+    && !(billing.plan === "unlimited" && billing.subscription_status === "active")
     && !((billing.plan === "monthly" || billing.plan === "annual")
       && (billing.subscription_status === "active" || billing.subscription_status === "trialing")
       && billing.stripe_customer_id);
