@@ -3304,20 +3304,47 @@ export default function App() {
   const [checkoutNotice, setCheckoutNotice] = useState("");
   const [checkoutError, setCheckoutError] = useState("");
 
+  // Keyed on user.id, not the user object — Supabase hands out a new user
+  // object on every auth event (INITIAL_SESSION, SIGNED_IN, TOKEN_REFRESHED),
+  // which used to fire overlapping fetches with no ordering guarantee.
+  // billingReq tags each fetch so only the newest one for the current user
+  // can write state; anything started before a sign-out/sign-in is dropped.
+  const userId = user?.id;
+  const billingReq = useRef(0);
+
   const refreshBilling = useCallback(async () => {
-    if (!user) return;
+    if (!userId) return;
+    const req = ++billingReq.current;
     try {
-      setBilling(await getBillingAccount(user.id));
-    } catch {
+      const row = await getBillingAccount(userId);
+      if (req !== billingReq.current) return; // superseded by a newer fetch or a user change
+      console.info("[billing]", { user_id: userId, plan: row.plan, subscription_status: row.subscription_status, comp_access: row.comp_access });
+      setBilling(row);
+    } catch (e) {
       // billing_accounts row should always exist (created by trigger on signup);
       // leave billing as-is on a transient fetch error rather than blocking the app.
+      console.warn("[billing] fetch failed", e?.message || e);
     }
-  }, [user]);
+  }, [userId]);
 
   useEffect(() => {
-    if (!user) { setBilling(undefined); return; }
-    refreshBilling();
-  }, [user, refreshBilling]);
+    billingReq.current++; // invalidate any in-flight fetch from the previous session
+    setBilling(undefined);
+    if (userId) refreshBilling();
+  }, [userId, refreshBilling]);
+
+  // Re-read whenever the tab regains focus, so DB-side changes (comp_access,
+  // webhook updates) take effect without a reload or re-login.
+  useEffect(() => {
+    if (!userId) return;
+    const onVisible = () => { if (document.visibilityState === "visible") refreshBilling(); };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onVisible);
+    };
+  }, [userId, refreshBilling]);
 
   // Every account starts at plan "trial" (meaning "no plan chosen yet") and
   // is blocked from the app entirely until they start a monthly/annual
