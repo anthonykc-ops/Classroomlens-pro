@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, Btn, Icon } from "./ui.jsx";
 import { startCheckout } from "../lib/billingApi.js";
 
@@ -21,6 +21,9 @@ const PLANS = [
 // not dismissible. mode "browse": voluntary, opened from Settings to view
 // or change plans — dismissible.
 export function PricingView({ mode = "gate", onDismiss }) {
+  useEffect(() => {
+    if (mode === "gate") console.log("[billing] PricingView gate mounted");
+  }, [mode]);
   const [loadingPlan, setLoadingPlan] = useState(null);
   const [err, setErr] = useState("");
 

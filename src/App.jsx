@@ -3528,6 +3528,19 @@ export default function App() {
     : (PAGE_META[tab] || {});
   const initial = (user.email || "?").trim()[0]?.toUpperCase() || "?";
 
+  // Diagnostic: exactly what the paywall gate ({blocked && <PricingView mode="gate" />}
+  // below) is evaluating on this render.
+  console.log("[billing] gate check", {
+    blocked,
+    user_id: userId,
+    billing_loaded: billing !== undefined,
+    comp_access: billing?.comp_access,
+    comp_access_type: typeof billing?.comp_access,
+    plan: billing?.plan,
+    subscription_status: billing?.subscription_status,
+    has_stripe_customer_id: !!billing?.stripe_customer_id,
+  });
+
   return (
     <div style={{ minHeight: "100vh", background: "var(--bg)", display: "flex" }}>
       <style>{css}</style>
