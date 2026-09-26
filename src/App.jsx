@@ -2891,10 +2891,16 @@ function SettingsView({ onClearSessions, sessionCount, legacyCount, onImportLega
       <Card style={{ borderTop: "3px solid var(--accent)" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 10, marginBottom: 14 }}>
           <Label>Plan & Billing</Label>
-          <Chip label={PLAN_LABEL[billing?.plan] || "No Plan Selected"} color={billing?.plan === "annual" ? "var(--accent)" : billing?.plan === "monthly" ? "var(--success)" : "var(--text-4)"} size="md" />
+          <Chip label={billing?.comp_access ? "Complimentary" : PLAN_LABEL[billing?.plan] || "No Plan Selected"} color={billing?.comp_access || billing?.plan === "annual" ? "var(--accent)" : billing?.plan === "monthly" ? "var(--success)" : "var(--text-4)"} size="md" />
         </div>
 
-        {(!billing || billing.plan === "trial") && (
+        {billing?.comp_access && (
+          <p style={{ fontSize: 13, color: "var(--text-2)", marginBottom: 14 }}>
+            Complimentary access — full, unlimited use with no subscription required.
+          </p>
+        )}
+
+        {(!billing || billing.plan === "trial") && !billing?.comp_access && (
           <>
             <p style={{ fontSize: 13, color: "var(--text-2)", marginBottom: 14 }}>
               No active plan yet.
@@ -3368,6 +3374,10 @@ export default function App() {
       && (billing.subscription_status === "active" || billing.subscription_status === "trialing")
       && billing.stripe_customer_id);
 
+  useEffect(() => {
+    if (billing !== undefined) console.info("[billing] gate", { blocked, comp_access: billing.comp_access, plan: billing.plan });
+  }, [billing, blocked]);
+
   // Returning from Stripe Checkout. session_id is read before the query
   // string is cleared so it can be verified directly against the Stripe API
   // (see api/verify-checkout-session.js) — faster and more reliable than
@@ -3587,7 +3597,8 @@ export default function App() {
             <div style={{ fontSize: 12, color: "var(--text-4)", marginTop: 2 }}>{meta.subtitle}</div>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-            {billing?.plan === "monthly" && <Chip label="Monthly Plan" color="var(--success)" size="md" />}
+            {billing?.comp_access && <Chip label="Complimentary" color="var(--accent)" size="md" />}
+            {!billing?.comp_access && billing?.plan === "monthly" && <Chip label="Monthly Plan" color="var(--success)" size="md" />}
             {billing?.plan === "annual" && <Chip label="Annual Plan" color="var(--accent)" size="md" />}
             {activeSession && (
               <div style={{ fontSize: 11, color: "var(--text-3)", background: "var(--accent-soft)", border: "1px solid #4f46e522", borderRadius: 7, padding: "5px 12px" }}>
